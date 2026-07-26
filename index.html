@@ -20,6 +20,7 @@
     --sage: #4d7654;
     --warn: #b03b26;
     --gauge-text: #fff8ec;
+    --ferment: #3f6f95;
     --radius: 10px;
     --font-display: 'Bebas Neue', sans-serif;
     --font-body: 'Inter', system-ui, -apple-system, sans-serif;
@@ -294,9 +295,21 @@
     padding: 14px 4px 0;
     font-family: var(--font-mono); font-size: 11px; color: var(--stone);
   }
+  .timeline-sortbar{
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    padding: 4px 4px 0;
+    font-family: var(--font-mono); font-size: 11px; color: var(--stone-dim);
+  }
+  .sort-btn{
+    font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .03em;
+    background: var(--bg-panel); border: 1px solid var(--line); color: var(--stone);
+    padding: 5px 10px; border-radius: 20px; cursor: pointer;
+  }
+  .sort-btn.active{ background: var(--amber); color: #1c1712; border-color: transparent; font-weight: 700; }
   .timeline-legend span{ display:inline-flex; align-items:center; gap:6px; }
   .legend-swatch{ width:12px; height:12px; border-radius:3px; display:inline-block; }
   .legend-swatch.cond{ background: repeating-linear-gradient(135deg, var(--copper), var(--copper) 3px, #d99a5f 3px, #d99a5f 6px); }
+  .legend-swatch.ferment{ background: var(--ferment); }
   .legend-swatch.tap{ background: var(--sage); }
   .legend-swatch.proj{ background: var(--sage); opacity: .4; }
   .legend-line{ width:14px; height:2px; background: var(--warn); display:inline-block; }
@@ -343,6 +356,7 @@
   .tl-bar.tl-conditioning{
     background: repeating-linear-gradient(135deg, var(--tap-color, var(--copper)), var(--tap-color, var(--copper)) 4px, rgba(255,255,255,0.35) 4px, rgba(255,255,255,0.35) 8px);
   }
+  .tl-bar.tl-fermenting{ background: var(--ferment); }
   .tl-bar.tl-projected{ opacity: 0.42; }
   .tl-bar.selected{ box-shadow: 0 0 0 2px #000 inset, 0 0 0 1px #000; }
 
@@ -382,6 +396,7 @@
 <nav class="tabbar" id="tabbar">
   <button class="tab active" data-tab="ontap">On Tap</button>
   <button class="tab" data-tab="conditioning">Conditioning</button>
+  <button class="tab" data-tab="fermenting">Fermenting</button>
   <button class="tab" data-tab="timeline">Timeline</button>
 </nav>
 
@@ -720,6 +735,25 @@
     return { historyByBeer, breweryAvg };
   }
 
+  // Averages the *entered* Conditioning Time value itself (not a date difference)
+  // across every batch of a beer that has one set, regardless of status.
+  function computeConditioningTimeHistory(batches, conditioningFieldName){
+    const byBeer = {}; // recipe name -> [conditioningDays]
+    const all = [];
+    for(const b of batches){
+      const name = normalizeBeerName(getRecipeName(b));
+      const raw = findMeasuredField(b, conditioningFieldName);
+      const days = (raw !== null && raw !== undefined && raw !== '') ? Number(raw) : null;
+      if(days !== null && !isNaN(days) && days > 0 && days < 400){
+        if(!byBeer[name]) byBeer[name] = [];
+        byBeer[name].push(days);
+        all.push(days);
+      }
+    }
+    const breweryAvg = all.length ? all.reduce((a,c)=>a+c,0) / all.length : null;
+    return { byBeer, breweryAvg };
+  }
+
   function computeOnTap(batches, tappedFieldName, kickedFieldName, historyByBeer, breweryAvg){
     const currentlyTapped = []; // { name, tappedDate, batchNumber }
 
@@ -820,6 +854,94 @@
       if(a.daysUntilReady === null) return 1;
       if(b.daysUntilReady === null) return -1;
       return a.daysUntilReady - b.daysUntilReady;
+    });
+
+    return list;
+  }
+
+  // Sums recipe.fermentation.steps[].stepTime (already in days per Brewfather's schema)
+  function getFermentationScheduleDays(batch){
+    if(batch.recipe && batch.recipe.fermentation && Array.isArray(batch.recipe.fermentation.steps)){
+      const total = batch.recipe.fermentation.steps.reduce((sum, step) => {
+        return sum + (typeof step.stepTime === 'number' ? step.stepTime : 0);
+      }, 0);
+      return total > 0 ? total : null;
+    }
+    return null;
+  }
+
+  function computeFermenting(batches, conditioningFieldName, condTimeByBeer, condTimeBreweryAvg, historyByBeer, breweryAvg){
+    const list = [];
+    for(const b of batches){
+      if(b.status !== 'Fermenting') continue;
+      const name = normalizeBeerName(getRecipeName(b));
+      const brewDate = parseBFValue(b.brewDate);
+      const fermDays = getFermentationScheduleDays(b);
+      const hasFermDays = fermDays !== null;
+
+      const doneDate = (brewDate && hasFermDays)
+        ? new Date(brewDate.getTime() + fermDays * 86400000)
+        : null;
+
+      const now = new Date();
+      let pctElapsed = 0, daysUntilDone = null;
+      if(brewDate && hasFermDays){
+        const elapsed = daysBetween(brewDate, now);
+        pctElapsed = fermDays > 0 ? Math.min(1, Math.max(0, elapsed / fermDays)) : 1;
+        daysUntilDone = Math.round(fermDays - elapsed);
+      }
+
+      // Conditioning Time: use the batch's own entered value if present,
+      // otherwise fall back to this beer's historical average, then brewery average.
+      const ownCondRaw = findMeasuredField(b, conditioningFieldName);
+      const ownCondDays = (ownCondRaw !== null && ownCondRaw !== undefined && ownCondRaw !== '') ? Number(ownCondRaw) : null;
+      const hasOwnCond = ownCondDays !== null && !isNaN(ownCondDays) && ownCondDays > 0;
+
+      let condDays = null, condSource = 'none';
+      if(hasOwnCond){
+        condDays = ownCondDays;
+        condSource = 'entered';
+      } else {
+        const beerCondHist = condTimeByBeer[name];
+        if(beerCondHist && beerCondHist.length){
+          condDays = beerCondHist.reduce((a,c)=>a+c,0) / beerCondHist.length;
+          condSource = 'beer average';
+        } else if(condTimeBreweryAvg !== null){
+          condDays = condTimeBreweryAvg;
+          condSource = 'brewery average';
+        }
+      }
+
+      const readyDate = (doneDate && condDays !== null)
+        ? new Date(doneDate.getTime() + condDays * 86400000)
+        : null;
+
+      const { avgDays, usedFallback, historyCount } = lookupAvgDuration(name, historyByBeer, breweryAvg);
+      const estKickDate = (readyDate && avgDays !== null) ? new Date(readyDate.getTime() + avgDays * 86400000) : null;
+
+      list.push({
+        name,
+        batchNumber: b.batchNo || b.batchNumber || null,
+        brewDate,
+        fermDays: hasFermDays ? fermDays : null,
+        doneDate,
+        pctElapsed,
+        daysUntilDone,
+        condDays,
+        condSource,
+        readyDate,
+        avgDays,
+        usedFallback,
+        historyCount,
+        estKickDate,
+        incomplete: !(brewDate && hasFermDays)
+      });
+    }
+
+    list.sort((a,b) => {
+      if(a.daysUntilDone === null) return 1;
+      if(b.daysUntilDone === null) return -1;
+      return a.daysUntilDone - b.daysUntilDone;
     });
 
     return list;
@@ -950,12 +1072,83 @@
     el.content.innerHTML = '<div class="grid">' + cards + '</div>';
   }
 
+  function renderFermenting(list){
+    if(list.length === 0){
+      el.content.innerHTML =
+        '<div class="empty-state"><strong>Nothing fermenting right now</strong>' +
+        'No batches have a Brewfather status of "Fermenting".</div>';
+      return;
+    }
+
+    const cards = list.map(k => {
+      const color = colorForBeer(k.name);
+
+      if(k.incomplete){
+        return (
+          '<div class="keg" style="--tap-color:' + color + '">' +
+            '<span class="keg-badge overdue">missing data</span>' +
+            '<div class="keg-name">' + escapeHtml(k.name) + '</div>' +
+            '<div class="keg-history">Needs a brew date and a recipe fermentation schedule (Change Fermentation Profile in Brewfather) to estimate when it\'ll be done. Check the debug panel.</div>' +
+          '</div>'
+        );
+      }
+
+      const pct = Math.round(k.pctElapsed * 100);
+      const done = k.daysUntilDone !== null && k.daysUntilDone <= 0;
+
+      let badge = '';
+      if(done){
+        badge = '<span class="keg-badge fresh">Done fermenting</span>';
+      } else if(k.daysUntilDone !== null){
+        badge = '<span class="keg-badge">' + k.daysUntilDone + 'd to go</span>';
+      }
+
+      const gaugeLabel = done ? 'fermentation complete' : (pct + '% through');
+
+      const condNote = k.condDays === null
+        ? 'No Conditioning Time set and no history yet — can\'t project a ready-to-tap date.'
+        : (k.condSource === 'entered'
+            ? 'Conditioning Time entered: ' + Math.round(k.condDays) + 'd.'
+            : 'No Conditioning Time entered yet — using ' + k.condSource + ' (' + Math.round(k.condDays) + 'd).');
+
+      const kickNote = k.avgDays === null
+        ? 'No on-tap history for this beer or the brewery yet — can\'t project a kick date.'
+        : (k.usedFallback
+            ? 'Once tapped, expect ~' + Math.round(k.avgDays) + ' days on tap (brewery average).'
+            : 'Once tapped, expect ~' + Math.round(k.avgDays) + ' days on tap, based on ' + k.historyCount + ' prior keg' + (k.historyCount === 1 ? '' : 's') + '.');
+
+      return (
+        '<div class="keg" style="--tap-color:' + color + '">' +
+          badge +
+          '<div class="keg-name">' + escapeHtml(k.name) + '</div>' +
+          '<div class="gauge-wrap">' +
+            '<div class="gauge-fill" style="width:' + Math.min(100, pct) + '%"></div>' +
+            '<div class="gauge-label"><span>' + fmtDate(k.brewDate) + '</span><span>' + gaugeLabel + '</span></div>' +
+          '</div>' +
+          '<div class="keg-meta">' +
+            '<span>Brewed <b>' + fmtDate(k.brewDate) + '</b></span>' +
+            '<span>Ferm. done <b>' + fmtDate(k.doneDate) + '</b></span>' +
+          '</div>' +
+          '<div class="keg-meta">' +
+            '<span>Ready to tap <b>' + (k.readyDate ? fmtDate(k.readyDate) : '—') + '</b></span>' +
+            '<span>Est. kicks <b>' + (k.estKickDate ? fmtDate(k.estKickDate) : '—') + '</b></span>' +
+          '</div>' +
+          '<div class="keg-history">' + condNote + '<br>' + kickNote + '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    el.content.innerHTML = '<div class="grid">' + cards + '</div>';
+  }
+
   function renderCurrentTab(){
     if(!lastComputed) return;
     if(currentTab === 'conditioning'){
       renderConditioning(lastComputed.conditioning);
+    } else if(currentTab === 'fermenting'){
+      renderFermenting(lastComputed.fermenting);
     } else if(currentTab === 'timeline'){
-      renderTimeline(lastComputed.kegs, lastComputed.conditioning);
+      renderTimeline(lastComputed.kegs, lastComputed.conditioning, lastComputed.fermenting);
     } else {
       renderOnTap(lastComputed.kegs);
     }
@@ -970,7 +1163,7 @@
   const MS_PER_DAY = 86400000;
   function daysFromBase(base, d){ return Math.round((d.getTime() - base.getTime()) / MS_PER_DAY); }
 
-  function computeTimeline(kegs, conditioning){
+  function computeTimeline(kegs, conditioning, fermenting){
     const rows = [];
 
     kegs.forEach((k, i) => {
@@ -985,6 +1178,7 @@
           { phase: 'ontap', start: k.tappedDate, end: tapEnd, projected: false, estimated: !tapEndKnown }
         ],
         sortStart: k.tappedDate,
+        onTapDate: k.tappedDate,
         subtitle: 'On tap now',
         detail: k
       });
@@ -1003,19 +1197,69 @@
         color: colorForBeer(c.name),
         segments: segs,
         sortStart: c.bottlingDate,
+        onTapDate: c.readyDate,
         subtitle: 'Conditioning',
         detail: c
       });
     });
 
-    rows.sort((a, b) => a.sortStart - b.sortStart);
+    fermenting.forEach((f, i) => {
+      if(f.incomplete) return;
+      const segs = [{ phase: 'fermenting', start: f.brewDate, end: f.doneDate, projected: false, estimated: false }];
+      if(f.readyDate){
+        segs.push({ phase: 'conditioning', start: f.doneDate, end: f.readyDate, projected: true, estimated: f.condSource !== 'entered' });
+        const tapEnd = f.estKickDate || new Date(f.readyDate.getTime() + 14 * MS_PER_DAY);
+        segs.push({ phase: 'ontap', start: f.readyDate, end: tapEnd, projected: true, estimated: !f.estKickDate });
+      }
+      rows.push({
+        key: 'ferment-' + i,
+        name: f.name,
+        batchNumber: f.batchNumber,
+        color: colorForBeer(f.name),
+        segments: segs,
+        sortStart: f.brewDate,
+        onTapDate: f.readyDate || null,
+        subtitle: 'Fermenting',
+        detail: f
+      });
+    });
+
     return rows;
   }
 
-  let timelineRowsCache = [];
+  function sortTimelineRows(rows, mode){
+    const sorted = rows.slice();
+    if(mode === 'batch'){
+      sorted.sort((a, b) => {
+        const an = (a.batchNumber !== null && a.batchNumber !== undefined) ? Number(a.batchNumber) : null;
+        const bn = (b.batchNumber !== null && b.batchNumber !== undefined) ? Number(b.batchNumber) : null;
+        const aValid = an !== null && !isNaN(an);
+        const bValid = bn !== null && !isNaN(bn);
+        if(!aValid && !bValid) return a.sortStart - b.sortStart;
+        if(!aValid) return 1;
+        if(!bValid) return -1;
+        return an - bn;
+      });
+    } else if(mode === 'ontap'){
+      sorted.sort((a, b) => {
+        const aValid = !!a.onTapDate;
+        const bValid = !!b.onTapDate;
+        if(!aValid && !bValid) return a.sortStart - b.sortStart;
+        if(!aValid) return 1;
+        if(!bValid) return -1;
+        return a.onTapDate - b.onTapDate;
+      });
+    } else {
+      sorted.sort((a, b) => a.sortStart - b.sortStart);
+    }
+    return sorted;
+  }
 
-  function renderTimeline(kegs, conditioning){
-    const rows = computeTimeline(kegs, conditioning);
+  let timelineRowsCache = [];
+  let timelineSortMode = 'batch';
+
+  function renderTimeline(kegs, conditioning, fermenting){
+    const rows = sortTimelineRows(computeTimeline(kegs, conditioning, fermenting), timelineSortMode);
     timelineRowsCache = rows;
 
     if(rows.length === 0){
@@ -1060,7 +1304,8 @@
       const bars = r.segments.map(s => {
         const left = Math.max(0, daysFromBase(minDate, s.start) * PX_PER_DAY);
         const width = Math.max(6, daysFromBase(s.start, s.end) * PX_PER_DAY);
-        const cls = 'tl-bar ' + (s.phase === 'conditioning' ? 'tl-conditioning' : '') + (s.projected ? ' tl-projected' : '');
+        const phaseCls = s.phase === 'conditioning' ? 'tl-conditioning' : (s.phase === 'fermenting' ? 'tl-fermenting' : '');
+        const cls = 'tl-bar ' + phaseCls + (s.projected ? ' tl-projected' : '');
         return '<div class="' + cls + '" data-row-key="' + r.key + '" style="left:' + left + 'px;width:' + width + 'px;--tap-color:' + r.color + '"></div>';
       }).join('');
       return (
@@ -1072,14 +1317,20 @@
     }).join('');
 
     el.content.innerHTML =
+      '<div class="timeline-sortbar">' +
+        '<span>Sort by</span>' +
+        '<button class="sort-btn' + (timelineSortMode === 'batch' ? ' active' : '') + '" data-sort="batch">Batch #</button>' +
+        '<button class="sort-btn' + (timelineSortMode === 'ontap' ? ' active' : '') + '" data-sort="ontap">On Tap Date</button>' +
+      '</div>' +
       '<div class="timeline-legend">' +
+        '<span><span class="legend-swatch ferment"></span>Fermenting</span>' +
         '<span><span class="legend-swatch cond"></span>Conditioning</span>' +
         '<span><span class="legend-swatch tap"></span>On tap</span>' +
         '<span><span class="legend-swatch proj"></span>Projected (not tapped yet)</span>' +
         '<span><span class="legend-line"></span>Today</span>' +
       '</div>' +
       '<div class="timeline-scroll">' +
-        '<div class="timeline-inner">' +
+        '<div class="timeline-inner" style="width:' + (132 + trackWidth) + 'px">' +
           '<div class="tl-axis-row">' +
             '<div class="tl-spacer"></div>' +
             '<div class="tl-axis-track" style="width:' + trackWidth + 'px">' + gridHtml + todayLineHtml + '</div>' +
@@ -1088,6 +1339,14 @@
         '</div>' +
       '</div>' +
       '<div class="timeline-detail" id="timelineDetail">Tap a bar or a beer name for details.</div>';
+
+    el.content.querySelectorAll('.sort-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(timelineSortMode === btn.dataset.sort) return;
+        timelineSortMode = btn.dataset.sort;
+        renderTimeline(kegs, conditioning, fermenting);
+      });
+    });
 
     // Auto-scroll so "today" starts near the left edge
     const scrollEl = el.content.querySelector('.timeline-scroll');
@@ -1108,7 +1367,12 @@
     if(!row || !panel) return;
     const d = row.detail;
     let lines = [];
-    if(row.subtitle === 'Conditioning'){
+    if(row.subtitle === 'Fermenting'){
+      lines.push('Brewed ' + fmtDate(d.brewDate) + ' · Schedule ' + (d.fermDays !== null ? d.fermDays + 'd' : '—'));
+      lines.push('Est. fermentation complete ' + fmtDate(d.doneDate));
+      lines.push(d.readyDate ? 'Ready to tap ' + fmtDate(d.readyDate) + ' (' + d.condSource + ' conditioning time)' : 'No conditioning time available to project readiness');
+      lines.push(d.estKickDate ? 'Projected to kick ' + fmtDate(d.estKickDate) : 'No history yet to project a kick date');
+    } else if(row.subtitle === 'Conditioning'){
       lines.push('Bottled ' + fmtDate(d.bottlingDate) + ' · Conditioning ' + (d.condDays !== null ? d.condDays + 'd' : '—'));
       lines.push('Ready to tap ' + fmtDate(d.readyDate));
       lines.push(d.estKickDate ? 'Projected to kick ' + fmtDate(d.estKickDate) : 'No history yet to project a kick date');
@@ -1140,8 +1404,10 @@
       const { historyByBeer, breweryAvg } = computeHistory(batches, s.tappedField, s.kickedField);
       const kegs = computeOnTap(batches, s.tappedField, s.kickedField, historyByBeer, breweryAvg);
       const conditioning = computeConditioning(batches, s.conditioningField, historyByBeer, breweryAvg);
+      const { byBeer: condTimeByBeer, breweryAvg: condTimeBreweryAvg } = computeConditioningTimeHistory(batches, s.conditioningField);
+      const fermenting = computeFermenting(batches, s.conditioningField, condTimeByBeer, condTimeBreweryAvg, historyByBeer, breweryAvg);
 
-      lastComputed = { kegs, conditioning };
+      lastComputed = { kegs, conditioning, fermenting };
       renderCurrentTab();
 
       if(batches.length > 0){
@@ -1150,7 +1416,7 @@
       }
 
       const now = new Date();
-      setStatus(batches.length + ' batches loaded · ' + kegs.length + ' on tap · ' + conditioning.length + ' conditioning · updated ' + now.toLocaleTimeString());
+      setStatus(batches.length + ' batches loaded · ' + kegs.length + ' on tap · ' + conditioning.length + ' conditioning · ' + fermenting.length + ' fermenting · updated ' + now.toLocaleTimeString());
     } catch(err){
       console.error(err);
       setStatus('Error: ' + err.message, 'error');
