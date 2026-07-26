@@ -263,6 +263,102 @@
     font-family: var(--font-mono); font-size: 10.5px; color: var(--stone-dim);
   }
 
+  .tabbar{
+    display:flex; gap: 4px;
+    padding: 14px 20px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .tab{
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: transparent;
+    border: none;
+    color: var(--stone-dim);
+    padding: 10px 4px 12px;
+    margin-right: 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  .tab.active{
+    color: var(--amber);
+    border-bottom-color: var(--amber);
+    font-weight: 700;
+  }
+  .tab:hover:not(.active){ color: var(--stone); }
+
+  /* Timeline */
+  .timeline-legend{
+    display:flex; gap:18px; flex-wrap:wrap;
+    padding: 14px 4px 0;
+    font-family: var(--font-mono); font-size: 11px; color: var(--stone);
+  }
+  .timeline-legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .legend-swatch{ width:12px; height:12px; border-radius:3px; display:inline-block; }
+  .legend-swatch.cond{ background: repeating-linear-gradient(135deg, var(--copper), var(--copper) 3px, #d99a5f 3px, #d99a5f 6px); }
+  .legend-swatch.tap{ background: var(--sage); }
+  .legend-swatch.proj{ background: var(--sage); opacity: .4; }
+  .legend-line{ width:14px; height:2px; background: var(--warn); display:inline-block; }
+
+  .timeline-scroll{
+    margin-top: 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+  }
+  .timeline-inner{ position: relative; }
+  .tl-row{ display:flex; border-bottom: 1px solid var(--line); }
+  .tl-row:last-child{ border-bottom: none; }
+  .tl-axis-row{ display:flex; border-bottom: 1px solid var(--line); position: sticky; top:0; z-index:3; background: var(--bg-card); }
+  .tl-label, .tl-spacer{
+    flex: 0 0 132px;
+    position: sticky; left: 0; z-index: 2;
+    background: var(--bg-card);
+    padding: 10px 10px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--cream);
+    border-right: 1px solid var(--line);
+    display:flex; flex-direction:column; justify-content:center;
+    overflow:hidden;
+  }
+  .tl-label small{ color: var(--stone-dim); font-size: 10px; }
+  .tl-track, .tl-axis-track{ position: relative; height: 46px; flex: 0 0 auto; }
+  .tl-axis-track{ height: 30px; }
+  .tl-gridline{ position:absolute; top:0; bottom:0; width:1px; background: var(--line); }
+  .tl-gridline-label{
+    position:absolute; top:6px; font-family: var(--font-mono); font-size: 10px; color: var(--stone-dim);
+    white-space:nowrap; transform: translateX(4px);
+  }
+  .tl-today-line{ position:absolute; top:0; bottom:0; width:2px; background: var(--warn); z-index:1; }
+  .tl-bar{
+    position:absolute; top:10px; height:26px; border-radius:5px;
+    background: var(--sage);
+    cursor:pointer;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+  }
+  .tl-bar.tl-conditioning{
+    background: repeating-linear-gradient(135deg, var(--tap-color, var(--copper)), var(--tap-color, var(--copper)) 4px, rgba(255,255,255,0.35) 4px, rgba(255,255,255,0.35) 8px);
+  }
+  .tl-bar.tl-projected{ opacity: 0.42; }
+  .tl-bar.selected{ box-shadow: 0 0 0 2px #000 inset, 0 0 0 1px #000; }
+
+  .timeline-detail{
+    margin-top: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--stone);
+    line-height: 1.6;
+  }
+  .timeline-detail strong{ color: var(--cream); font-family: var(--font-body); font-size: 15px; display:block; margin-bottom: 4px; }
+
   @media (max-width: 480px){
     h1{ font-size: 34px; }
     header{ padding: 20px 16px 14px; }
@@ -283,6 +379,12 @@
   </div>
 </header>
 
+<nav class="tabbar" id="tabbar">
+  <button class="tab active" data-tab="ontap">On Tap</button>
+  <button class="tab" data-tab="conditioning">Conditioning</button>
+  <button class="tab" data-tab="timeline">Timeline</button>
+</nav>
+
 <div class="status-line" id="statusLine"></div>
 
 <main>
@@ -294,7 +396,7 @@
   </div>
 
   <details class="debug" id="debugPanel" style="display:none;">
-    <summary>Debug — raw batch data (use this if Date Tapped / Date Kicked aren't showing up)</summary>
+    <summary>Debug — raw batch data (use this if fields aren't showing up)</summary>
     <pre id="debugOutput"></pre>
   </details>
 </main>
@@ -328,6 +430,10 @@
         <label for="volUnitInput">Volume unit label (display only)</label>
         <input id="volUnitInput" type="text" value="gal">
       </div>
+      <div class="field">
+        <label for="conditioningFieldInput">"Conditioning Time" field name</label>
+        <input id="conditioningFieldInput" type="text" value="Conditioning Time">
+      </div>
     </details>
     <div class="modal-actions">
       <button class="btn ghost" id="closeSettingsBtn">Cancel</button>
@@ -345,8 +451,12 @@
     apiKey: 'ontap_bf_apikey',
     tappedField: 'ontap_field_tapped',
     kickedField: 'ontap_field_kicked',
-    volUnit: 'ontap_vol_unit'
+    volUnit: 'ontap_vol_unit',
+    conditioningField: 'ontap_field_conditioning'
   };
+
+  let currentTab = 'ontap';
+  let lastComputed = null; // { kegs, conditioning }
 
   const el = {
     statusLine: document.getElementById('statusLine'),
@@ -361,8 +471,10 @@
     tappedFieldInput: document.getElementById('tappedFieldInput'),
     kickedFieldInput: document.getElementById('kickedFieldInput'),
     volUnitInput: document.getElementById('volUnitInput'),
+    conditioningFieldInput: document.getElementById('conditioningFieldInput'),
     debugPanel: document.getElementById('debugPanel'),
-    debugOutput: document.getElementById('debugOutput')
+    debugOutput: document.getElementById('debugOutput'),
+    tabbar: document.getElementById('tabbar')
   };
 
   const TAP_COLORS = ['#c1861f', '#a8501f', '#4d7654', '#3f6f95', '#8a4f95', '#8a7519'];
@@ -373,7 +485,8 @@
       apiKey: localStorage.getItem(LS_KEYS.apiKey) || '',
       tappedField: localStorage.getItem(LS_KEYS.tappedField) || 'Date Tapped',
       kickedField: localStorage.getItem(LS_KEYS.kickedField) || 'Date Kicked',
-      volUnit: localStorage.getItem(LS_KEYS.volUnit) || 'gal'
+      volUnit: localStorage.getItem(LS_KEYS.volUnit) || 'gal',
+      conditioningField: localStorage.getItem(LS_KEYS.conditioningField) || 'Conditioning Time'
     };
   }
 
@@ -384,6 +497,7 @@
     el.tappedFieldInput.value = s.tappedField;
     el.kickedFieldInput.value = s.kickedField;
     el.volUnitInput.value = s.volUnit;
+    el.conditioningFieldInput.value = s.conditioningField;
     el.settingsOverlay.style.display = 'flex';
   }
   function closeSettings(){ el.settingsOverlay.style.display = 'none'; }
@@ -397,10 +511,19 @@
     localStorage.setItem(LS_KEYS.tappedField, el.tappedFieldInput.value.trim() || 'Date Tapped');
     localStorage.setItem(LS_KEYS.kickedField, el.kickedFieldInput.value.trim() || 'Date Kicked');
     localStorage.setItem(LS_KEYS.volUnit, el.volUnitInput.value.trim() || 'gal');
+    localStorage.setItem(LS_KEYS.conditioningField, el.conditioningFieldInput.value.trim() || 'Conditioning Time');
     closeSettings();
     loadAndRender();
   });
   el.refreshBtn.addEventListener('click', loadAndRender);
+
+  el.tabbar.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.tab');
+    if(!btn) return;
+    currentTab = btn.dataset.tab;
+    el.tabbar.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === btn));
+    if(lastComputed) renderCurrentTab();
+  });
 
   function setStatus(text, type){
     el.statusLine.className = 'status-line' + (type === 'error' ? ' error' : '');
@@ -561,22 +684,28 @@
 
   // ---------- Core computation ----------
 
-  function computeOnTap(batches, tappedFieldName, kickedFieldName){
+  function lookupAvgDuration(name, historyByBeer, breweryAvg){
+    const hist = historyByBeer[name];
+    const hasHistory = hist && hist.length > 0;
+    const avgDays = hasHistory
+      ? hist.reduce((a,c)=>a+c,0) / hist.length
+      : breweryAvg;
+    return {
+      avgDays: (avgDays === undefined) ? null : avgDays,
+      usedFallback: !hasHistory,
+      historyCount: hasHistory ? hist.length : 0
+    };
+  }
+
+  function computeHistory(batches, tappedFieldName, kickedFieldName){
     const historyByBeer = {}; // recipe name -> [durationDays]
     const allDurations = [];
-    const currentlyTapped = []; // { name, tappedDate, batchNumber }
-
     for(const b of batches){
+      if(b.status === 'Completed') continue; // Completed = currently tapped, not history
       const name = normalizeBeerName(getRecipeName(b));
-      const tappedRaw = findMeasuredField(b, tappedFieldName);
-      const kickedRaw = findMeasuredField(b, kickedFieldName);
-      const tappedDate = parseBFValue(tappedRaw);
-      const kickedDate = parseBFValue(kickedRaw);
-      const isCompleted = b.status === 'Completed';
-
-      if(!isCompleted && tappedDate && kickedDate){
-        // Non-Completed batches with both dates are past kegs of this beer —
-        // this is the history pool used to estimate how long a keg lasts.
+      const tappedDate = parseBFValue(findMeasuredField(b, tappedFieldName));
+      const kickedDate = parseBFValue(findMeasuredField(b, kickedFieldName));
+      if(tappedDate && kickedDate){
         const dur = daysBetween(tappedDate, kickedDate);
         if(dur > 0 && dur < 400){ // sanity guard against bad data
           if(!historyByBeer[name]) historyByBeer[name] = [];
@@ -584,7 +713,22 @@
           allDurations.push(dur);
         }
       }
-      if(isCompleted && tappedDate && !kickedDate){
+    }
+    const breweryAvg = allDurations.length
+      ? allDurations.reduce((a,c)=>a+c,0) / allDurations.length
+      : null;
+    return { historyByBeer, breweryAvg };
+  }
+
+  function computeOnTap(batches, tappedFieldName, kickedFieldName, historyByBeer, breweryAvg){
+    const currentlyTapped = []; // { name, tappedDate, batchNumber }
+
+    for(const b of batches){
+      if(b.status !== 'Completed') continue;
+      const name = normalizeBeerName(getRecipeName(b));
+      const tappedDate = parseBFValue(findMeasuredField(b, tappedFieldName));
+      const kickedDate = parseBFValue(findMeasuredField(b, kickedFieldName));
+      if(tappedDate && !kickedDate){
         // Completed status + tapped + not yet kicked = currently pouring
         const volKegged = (typeof b.measuredBottlingSize === 'number') ? b.measuredBottlingSize : null;
         const volOnHandNode = findMeasuredField(b, 'Vol On Hand');
@@ -599,17 +743,8 @@
       }
     }
 
-    const breweryAvg = allDurations.length
-      ? allDurations.reduce((a,c)=>a+c,0) / allDurations.length
-      : null;
-
     const kegs = currentlyTapped.map(k => {
-      const hist = historyByBeer[k.name];
-      const hasHistory = hist && hist.length > 0;
-      const avgDays = hasHistory
-        ? hist.reduce((a,c)=>a+c,0) / hist.length
-        : breweryAvg;
-      const usedFallback = !hasHistory;
+      const { avgDays, usedFallback, historyCount } = lookupAvgDuration(k.name, historyByBeer, breweryAvg);
       const now = new Date();
       const elapsedDays = daysBetween(k.tappedDate, now);
       const estKickDate = avgDays !== null ? new Date(k.tappedDate.getTime() + avgDays * 86400000) : null;
@@ -624,7 +759,7 @@
         volOnHand: k.volOnHand,
         avgDays,
         usedFallback,
-        historyCount: hasHistory ? hist.length : 0,
+        historyCount,
         estKickDate,
         pctElapsed,
         daysRemaining
@@ -637,12 +772,62 @@
       return a.daysRemaining - b.daysRemaining;
     });
 
-    return { kegs, breweryAvg };
+    return kegs;
+  }
+
+  function computeConditioning(batches, conditioningFieldName, historyByBeer, breweryAvg){
+    const list = [];
+    for(const b of batches){
+      if(b.status !== 'Conditioning') continue;
+      const name = normalizeBeerName(getRecipeName(b));
+      const bottlingDate = parseBFValue(b.bottlingDate);
+      const condRaw = findMeasuredField(b, conditioningFieldName);
+      const condDays = (condRaw !== null && condRaw !== undefined && condRaw !== '') ? Number(condRaw) : null;
+      const hasCondDays = condDays !== null && !isNaN(condDays);
+
+      const readyDate = (bottlingDate && hasCondDays)
+        ? new Date(bottlingDate.getTime() + condDays * 86400000)
+        : null;
+
+      const { avgDays, usedFallback, historyCount } = lookupAvgDuration(name, historyByBeer, breweryAvg);
+      const estKickDate = (readyDate && avgDays !== null) ? new Date(readyDate.getTime() + avgDays * 86400000) : null;
+
+      const now = new Date();
+      let pctElapsed = 0, daysUntilReady = null;
+      if(bottlingDate && hasCondDays){
+        const elapsed = daysBetween(bottlingDate, now);
+        pctElapsed = condDays > 0 ? Math.min(1, Math.max(0, elapsed / condDays)) : 1;
+        daysUntilReady = Math.round(condDays - elapsed);
+      }
+
+      list.push({
+        name,
+        batchNumber: b.batchNo || b.batchNumber || null,
+        bottlingDate,
+        condDays: hasCondDays ? condDays : null,
+        readyDate,
+        pctElapsed,
+        daysUntilReady,
+        avgDays,
+        usedFallback,
+        historyCount,
+        estKickDate,
+        incomplete: !(bottlingDate && hasCondDays)
+      });
+    }
+
+    list.sort((a,b) => {
+      if(a.daysUntilReady === null) return 1;
+      if(b.daysUntilReady === null) return -1;
+      return a.daysUntilReady - b.daysUntilReady;
+    });
+
+    return list;
   }
 
   // ---------- Render ----------
 
-  function render(kegs){
+  function renderOnTap(kegs){
     if(kegs.length === 0){
       el.content.innerHTML =
         '<div class="empty-state"><strong>Nothing on tap right now</strong>' +
@@ -702,10 +887,241 @@
     el.content.innerHTML = '<div class="grid">' + cards + '</div>';
   }
 
+  function renderConditioning(list){
+    if(list.length === 0){
+      el.content.innerHTML =
+        '<div class="empty-state"><strong>Nothing conditioning right now</strong>' +
+        'No batches have a Brewfather status of "Conditioning".</div>';
+      return;
+    }
+
+    const cards = list.map(k => {
+      const color = colorForBeer(k.name);
+
+      if(k.incomplete){
+        return (
+          '<div class="keg" style="--tap-color:' + color + '">' +
+            '<span class="keg-badge overdue">missing data</span>' +
+            '<div class="keg-name">' + escapeHtml(k.name) + '</div>' +
+            '<div class="keg-history">Needs both a bottling date and a "' + escapeHtml(getSettings().conditioningField) + '" value to estimate readiness. Check the debug panel.</div>' +
+          '</div>'
+        );
+      }
+
+      const pct = Math.round(k.pctElapsed * 100);
+      const ready = k.daysUntilReady !== null && k.daysUntilReady <= 0;
+
+      let badge = '';
+      if(ready){
+        badge = '<span class="keg-badge fresh">Ready</span>';
+      } else if(k.daysUntilReady !== null){
+        badge = '<span class="keg-badge">' + k.daysUntilReady + 'd to go</span>';
+      }
+
+      const gaugeLabel = ready ? 'ready to tap' : (pct + '% conditioned');
+
+      const historyNote = k.avgDays === null
+        ? 'No on-tap history for this beer or the brewery yet — can\'t estimate how long it\'ll last once tapped.'
+        : (k.usedFallback
+            ? 'Once tapped, expect ~' + Math.round(k.avgDays) + ' days on tap (brewery average — no history for this beer yet).'
+            : 'Once tapped, expect ~' + Math.round(k.avgDays) + ' days on tap, based on ' + k.historyCount + ' prior keg' + (k.historyCount === 1 ? '' : 's') + '.');
+
+      return (
+        '<div class="keg" style="--tap-color:' + color + '">' +
+          badge +
+          '<div class="keg-name">' + escapeHtml(k.name) + '</div>' +
+          '<div class="gauge-wrap">' +
+            '<div class="gauge-fill" style="width:' + Math.min(100, pct) + '%"></div>' +
+            '<div class="gauge-label"><span>' + fmtDate(k.bottlingDate) + '</span><span>' + gaugeLabel + '</span></div>' +
+          '</div>' +
+          '<div class="keg-meta">' +
+            '<span>Bottled <b>' + fmtDate(k.bottlingDate) + '</b></span>' +
+            '<span>Ready to tap <b>' + fmtDate(k.readyDate) + '</b></span>' +
+          '</div>' +
+          '<div class="keg-meta">' +
+            '<span>Conditioning <b>' + k.condDays + 'd</b></span>' +
+            '<span>Est. kicks <b>' + (k.estKickDate ? fmtDate(k.estKickDate) : '—') + '</b></span>' +
+          '</div>' +
+          '<div class="keg-history">' + historyNote + '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    el.content.innerHTML = '<div class="grid">' + cards + '</div>';
+  }
+
+  function renderCurrentTab(){
+    if(!lastComputed) return;
+    if(currentTab === 'conditioning'){
+      renderConditioning(lastComputed.conditioning);
+    } else if(currentTab === 'timeline'){
+      renderTimeline(lastComputed.kegs, lastComputed.conditioning);
+    } else {
+      renderOnTap(lastComputed.kegs);
+    }
+  }
+
   function escapeHtml(str){
     const d = document.createElement('div');
     d.textContent = str;
     return d.innerHTML;
+  }
+
+  const MS_PER_DAY = 86400000;
+  function daysFromBase(base, d){ return Math.round((d.getTime() - base.getTime()) / MS_PER_DAY); }
+
+  function computeTimeline(kegs, conditioning){
+    const rows = [];
+
+    kegs.forEach((k, i) => {
+      const tapEndKnown = !!k.estKickDate;
+      const tapEnd = k.estKickDate || new Date(Date.now() + 14 * MS_PER_DAY);
+      rows.push({
+        key: 'ontap-' + i,
+        name: k.name,
+        batchNumber: k.batchNumber,
+        color: colorForBeer(k.name),
+        segments: [
+          { phase: 'ontap', start: k.tappedDate, end: tapEnd, projected: false, estimated: !tapEndKnown }
+        ],
+        sortStart: k.tappedDate,
+        subtitle: 'On tap now',
+        detail: k
+      });
+    });
+
+    conditioning.forEach((c, i) => {
+      if(c.incomplete) return;
+      const segs = [{ phase: 'conditioning', start: c.bottlingDate, end: c.readyDate, projected: false, estimated: false }];
+      const tapEndKnown = !!c.estKickDate;
+      const tapEnd = c.estKickDate || new Date(c.readyDate.getTime() + 14 * MS_PER_DAY);
+      segs.push({ phase: 'ontap', start: c.readyDate, end: tapEnd, projected: true, estimated: !tapEndKnown });
+      rows.push({
+        key: 'cond-' + i,
+        name: c.name,
+        batchNumber: c.batchNumber,
+        color: colorForBeer(c.name),
+        segments: segs,
+        sortStart: c.bottlingDate,
+        subtitle: 'Conditioning',
+        detail: c
+      });
+    });
+
+    rows.sort((a, b) => a.sortStart - b.sortStart);
+    return rows;
+  }
+
+  let timelineRowsCache = [];
+
+  function renderTimeline(kegs, conditioning){
+    const rows = computeTimeline(kegs, conditioning);
+    timelineRowsCache = rows;
+
+    if(rows.length === 0){
+      el.content.innerHTML = '<div class="empty-state"><strong>Nothing to plot yet</strong>Nothing is currently on tap or conditioning.</div>';
+      return;
+    }
+
+    const today = new Date();
+    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    let minDate = new Date(todayMidnight.getTime() - 3 * MS_PER_DAY);
+    let maxDate = new Date(todayMidnight.getTime() + 7 * MS_PER_DAY);
+    rows.forEach(r => {
+      r.segments.forEach(s => {
+        if(s.start < minDate) minDate = s.start;
+        if(s.end > maxDate) maxDate = s.end;
+      });
+    });
+    // Clamp to something sane so a bad data point can't blow out the chart
+    const maxCap = new Date(todayMidnight.getTime() + 240 * MS_PER_DAY);
+    if(maxDate > maxCap) maxDate = maxCap;
+
+    const PX_PER_DAY = 20;
+    const totalDays = daysFromBase(minDate, maxDate) + 2;
+    const trackWidth = totalDays * PX_PER_DAY;
+
+    // Weekly gridlines, aligned to ISO Monday week starts
+    let gridHtml = '';
+    // getDay(): 0=Sun..6=Sat. Distance back to the most recent Monday.
+    const dback = (minDate.getDay() + 6) % 7;
+    for(let gd = new Date(minDate.getTime() - dback * MS_PER_DAY); gd <= maxDate; gd = new Date(gd.getTime() + 7 * MS_PER_DAY)){
+      const offsetDays = daysFromBase(minDate, gd);
+      if(offsetDays < 0) continue;
+      const left = offsetDays * PX_PER_DAY;
+      gridHtml += '<div class="tl-gridline" style="left:' + left + 'px"></div>' +
+        '<div class="tl-gridline-label" style="left:' + left + 'px">' + MONTH_ABBR[gd.getMonth()] + ' ' + gd.getDate() + '</div>';
+    }
+    const todayLeft = daysFromBase(minDate, todayMidnight) * PX_PER_DAY;
+    const todayLineHtml = '<div class="tl-today-line" style="left:' + todayLeft + 'px"></div>';
+
+    const rowsHtml = rows.map(r => {
+      const bars = r.segments.map(s => {
+        const left = Math.max(0, daysFromBase(minDate, s.start) * PX_PER_DAY);
+        const width = Math.max(6, daysFromBase(s.start, s.end) * PX_PER_DAY);
+        const cls = 'tl-bar ' + (s.phase === 'conditioning' ? 'tl-conditioning' : '') + (s.projected ? ' tl-projected' : '');
+        return '<div class="' + cls + '" data-row-key="' + r.key + '" style="left:' + left + 'px;width:' + width + 'px;--tap-color:' + r.color + '"></div>';
+      }).join('');
+      return (
+        '<div class="tl-row">' +
+          '<div class="tl-label" data-row-key="' + r.key + '">' + escapeHtml(r.name) + '<small>' + r.subtitle + (r.batchNumber ? ' · #' + escapeHtml(String(r.batchNumber)) : '') + '</small></div>' +
+          '<div class="tl-track" style="width:' + trackWidth + 'px">' + gridHtml + todayLineHtml + bars + '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    el.content.innerHTML =
+      '<div class="timeline-legend">' +
+        '<span><span class="legend-swatch cond"></span>Conditioning</span>' +
+        '<span><span class="legend-swatch tap"></span>On tap</span>' +
+        '<span><span class="legend-swatch proj"></span>Projected (not tapped yet)</span>' +
+        '<span><span class="legend-line"></span>Today</span>' +
+      '</div>' +
+      '<div class="timeline-scroll">' +
+        '<div class="timeline-inner">' +
+          '<div class="tl-axis-row">' +
+            '<div class="tl-spacer"></div>' +
+            '<div class="tl-axis-track" style="width:' + trackWidth + 'px">' + gridHtml + todayLineHtml + '</div>' +
+          '</div>' +
+          rowsHtml +
+        '</div>' +
+      '</div>' +
+      '<div class="timeline-detail" id="timelineDetail">Tap a bar or a beer name for details.</div>';
+
+    // Auto-scroll so "today" starts near the left edge
+    const scrollEl = el.content.querySelector('.timeline-scroll');
+    if(scrollEl) scrollEl.scrollLeft = Math.max(0, todayLeft - 40);
+
+    el.content.querySelectorAll('.tl-bar, .tl-label').forEach(node => {
+      node.addEventListener('click', () => {
+        el.content.querySelectorAll('.tl-bar.selected').forEach(b => b.classList.remove('selected'));
+        el.content.querySelectorAll('.tl-bar[data-row-key="' + node.dataset.rowKey + '"]').forEach(b => b.classList.add('selected'));
+        showTimelineDetail(node.dataset.rowKey);
+      });
+    });
+  }
+
+  function showTimelineDetail(rowKey){
+    const row = timelineRowsCache.find(r => r.key === rowKey);
+    const panel = document.getElementById('timelineDetail');
+    if(!row || !panel) return;
+    const d = row.detail;
+    let lines = [];
+    if(row.subtitle === 'Conditioning'){
+      lines.push('Bottled ' + fmtDate(d.bottlingDate) + ' · Conditioning ' + (d.condDays !== null ? d.condDays + 'd' : '—'));
+      lines.push('Ready to tap ' + fmtDate(d.readyDate));
+      lines.push(d.estKickDate ? 'Projected to kick ' + fmtDate(d.estKickDate) : 'No history yet to project a kick date');
+    } else {
+      lines.push('Tapped ' + fmtDate(d.tappedDate));
+      lines.push(d.estKickDate ? 'Est. kicks ' + fmtDate(d.estKickDate) : 'No estimate available');
+      if(d.volKegged !== null || d.volOnHand !== null){
+        const volUnit = getSettings().volUnit;
+        lines.push('Kegged ' + (d.volKegged !== null ? d.volKegged + ' ' + volUnit : '—') + ' · On hand ' + (d.volOnHand !== null ? d.volOnHand + ' ' + volUnit : '—'));
+      }
+    }
+    panel.innerHTML = '<strong>' + escapeHtml(row.name) + (row.batchNumber ? ' — batch #' + escapeHtml(String(row.batchNumber)) : '') + '</strong>' +
+      lines.map(l => '<div>' + escapeHtml(l) + '</div>').join('');
   }
 
   // ---------- Load flow ----------
@@ -718,11 +1134,15 @@
       return;
     }
     el.refreshBtn.disabled = true;
-    setStatus('Fetching completed batches from Brewfather…', 'loading');
+    setStatus('Fetching batches from Brewfather…', 'loading');
     try{
       const batches = await fetchAllBatches(s.userId, s.apiKey);
-      const { kegs } = computeOnTap(batches, s.tappedField, s.kickedField);
-      render(kegs);
+      const { historyByBeer, breweryAvg } = computeHistory(batches, s.tappedField, s.kickedField);
+      const kegs = computeOnTap(batches, s.tappedField, s.kickedField, historyByBeer, breweryAvg);
+      const conditioning = computeConditioning(batches, s.conditioningField, historyByBeer, breweryAvg);
+
+      lastComputed = { kegs, conditioning };
+      renderCurrentTab();
 
       if(batches.length > 0){
         el.debugPanel.style.display = 'block';
@@ -730,7 +1150,7 @@
       }
 
       const now = new Date();
-      setStatus(batches.length + ' batches loaded · ' + kegs.length + ' currently on tap · updated ' + now.toLocaleTimeString());
+      setStatus(batches.length + ' batches loaded · ' + kegs.length + ' on tap · ' + conditioning.length + ' conditioning · updated ' + now.toLocaleTimeString());
     } catch(err){
       console.error(err);
       setStatus('Error: ' + err.message, 'error');
