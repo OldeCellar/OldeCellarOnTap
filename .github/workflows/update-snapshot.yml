@@ -1,0 +1,33 @@
+name: Update Brewfather Snapshot
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # every 30 minutes — edit if you want it more/less frequent
+  workflow_dispatch: {}       # lets you trigger it manually from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Fetch Brewfather batches
+        env:
+          BF_USER_ID: ${{ secrets.BF_USER_ID }}
+          BF_API_KEY: ${{ secrets.BF_API_KEY }}
+        run: node scripts/fetch-batches.mjs
+
+      - name: Commit snapshot if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/batches.json
+          git diff --staged --quiet || git commit -m "Update Brewfather snapshot [skip ci]"
+          git push
