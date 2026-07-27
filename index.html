@@ -233,12 +233,12 @@
     text-transform: uppercase; letter-spacing: .06em; color: var(--stone);
     margin-bottom: 6px;
   }
-  .field input{
+  .field input, .field select{
     width: 100%; background: var(--bg); border: 1px solid var(--line);
     color: var(--cream); padding: 10px 12px; border-radius: 8px;
     font-family: var(--font-mono); font-size: 13px;
   }
-  .field input:focus{ outline: none; border-color: var(--amber); }
+  .field input:focus, .field select:focus{ outline: none; border-color: var(--amber); }
   .modal-actions{ display:flex; gap:10px; margin-top: 18px; justify-content: flex-end; }
   details.adv{ margin-top: 4px; }
   details.adv summary{ cursor:pointer; font-family: var(--font-mono); font-size: 11px; color: var(--stone-dim); margin-bottom: 10px; }
@@ -417,8 +417,8 @@
 <main>
   <div id="content">
     <div class="empty-state">
-      <strong>Not connected yet</strong>
-      Add your Brewfather User ID and API Key in Settings, then hit Refresh.
+      <strong>Loading…</strong>
+      Checking for a published snapshot.
     </div>
   </div>
 
@@ -428,21 +428,35 @@
   </details>
 </main>
 
-<footer>On Tap · reads directly from the Brewfather API · your API key stays in this browser</footer>
+<footer>On Tap · reads a snapshot published by GitHub Actions, or live from Brewfather in Live mode</footer>
 
 <!-- Settings modal -->
 <div class="modal-overlay" id="settingsOverlay" style="display:none;">
   <div class="modal">
     <h2>Settings</h2>
-    <p class="hint">Create a read-only API key in Brewfather under Settings → API (scopes: batches.read). Stored only in this browser's local storage — never sent anywhere but Brewfather.</p>
+    <p class="hint">By default this reads a snapshot published by a scheduled GitHub Action — no login needed, safe to share the link. "Live" mode calls Brewfather directly using your own key, stored only in this browser.</p>
+
     <div class="field">
-      <label for="userIdInput">User ID</label>
-      <input id="userIdInput" type="text" autocomplete="off" spellcheck="false">
+      <label for="dataSourceInput">Data source</label>
+      <select id="dataSourceInput">
+        <option value="auto">Auto — snapshot, falls back to live if missing</option>
+        <option value="snapshot">Snapshot only (safe to share)</option>
+        <option value="live">Live API (needs your own key, private use)</option>
+      </select>
     </div>
-    <div class="field">
-      <label for="apiKeyInput">API Key</label>
-      <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false">
-    </div>
+
+    <details class="adv" id="liveCredsDetails">
+      <summary>Live API credentials (only needed for Live mode)</summary>
+      <div class="field">
+        <label for="userIdInput">User ID</label>
+        <input id="userIdInput" type="text" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="apiKeyInput">API Key</label>
+        <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false">
+      </div>
+    </details>
+
     <details class="adv">
       <summary>Advanced — custom field names</summary>
       <div class="field">
@@ -479,7 +493,8 @@
     tappedField: 'ontap_field_tapped',
     kickedField: 'ontap_field_kicked',
     volUnit: 'ontap_vol_unit',
-    conditioningField: 'ontap_field_conditioning'
+    conditioningField: 'ontap_field_conditioning',
+    dataSource: 'ontap_data_source'
   };
 
   let currentTab = 'ontap';
@@ -493,6 +508,7 @@
     settingsOverlay: document.getElementById('settingsOverlay'),
     closeSettingsBtn: document.getElementById('closeSettingsBtn'),
     saveSettingsBtn: document.getElementById('saveSettingsBtn'),
+    dataSourceInput: document.getElementById('dataSourceInput'),
     userIdInput: document.getElementById('userIdInput'),
     apiKeyInput: document.getElementById('apiKeyInput'),
     tappedFieldInput: document.getElementById('tappedFieldInput'),
@@ -513,12 +529,14 @@
       tappedField: localStorage.getItem(LS_KEYS.tappedField) || 'Date Tapped',
       kickedField: localStorage.getItem(LS_KEYS.kickedField) || 'Date Kicked',
       volUnit: localStorage.getItem(LS_KEYS.volUnit) || 'gal',
-      conditioningField: localStorage.getItem(LS_KEYS.conditioningField) || 'Conditioning Time'
+      conditioningField: localStorage.getItem(LS_KEYS.conditioningField) || 'Conditioning Time',
+      dataSource: localStorage.getItem(LS_KEYS.dataSource) || 'auto'
     };
   }
 
   function openSettings(){
     const s = getSettings();
+    el.dataSourceInput.value = s.dataSource;
     el.userIdInput.value = s.userId;
     el.apiKeyInput.value = s.apiKey;
     el.tappedFieldInput.value = s.tappedField;
@@ -533,6 +551,7 @@
   el.closeSettingsBtn.addEventListener('click', closeSettings);
   el.settingsOverlay.addEventListener('click', (e)=>{ if(e.target === el.settingsOverlay) closeSettings(); });
   el.saveSettingsBtn.addEventListener('click', ()=>{
+    localStorage.setItem(LS_KEYS.dataSource, el.dataSourceInput.value);
     localStorage.setItem(LS_KEYS.userId, el.userIdInput.value.trim());
     localStorage.setItem(LS_KEYS.apiKey, el.apiKeyInput.value.trim());
     localStorage.setItem(LS_KEYS.tappedField, el.tappedFieldInput.value.trim() || 'Date Tapped');
@@ -1409,17 +1428,55 @@
 
   // ---------- Load flow ----------
 
+  async function fetchSnapshot(){
+    const res = await fetch('./data/batches.json', { cache: 'no-store' });
+    if(!res.ok) throw new Error('Snapshot not found (HTTP ' + res.status + ')');
+    const data = await res.json();
+    if(!data || !Array.isArray(data.batches)) throw new Error('Snapshot file is malformed');
+    return data; // { generatedAt, batches }
+  }
+
   async function loadAndRender(){
     const s = getSettings();
-    if(!s.userId || !s.apiKey){
-      setStatus('Add your Brewfather credentials in Settings to get started.');
-      openSettings();
-      return;
-    }
     el.refreshBtn.disabled = true;
-    setStatus('Fetching batches from Brewfather…', 'loading');
+
+    let batches = null;
+    let sourceLabel = '';
+
     try{
-      const batches = await fetchAllBatches(s.userId, s.apiKey);
+      if(s.dataSource === 'live'){
+        if(!s.userId || !s.apiKey){
+          setStatus('Live mode needs your Brewfather User ID and API Key — add them in Settings.');
+          openSettings();
+          el.refreshBtn.disabled = false;
+          return;
+        }
+        setStatus('Fetching live batches from Brewfather…', 'loading');
+        batches = await fetchAllBatches(s.userId, s.apiKey);
+        sourceLabel = 'Live';
+      } else if(s.dataSource === 'snapshot'){
+        setStatus('Loading snapshot…', 'loading');
+        const snap = await fetchSnapshot();
+        batches = snap.batches;
+        sourceLabel = 'Snapshot from ' + new Date(snap.generatedAt).toLocaleString();
+      } else {
+        // auto: prefer the snapshot (safe to share); fall back to live if it's missing
+        setStatus('Loading snapshot…', 'loading');
+        try{
+          const snap = await fetchSnapshot();
+          batches = snap.batches;
+          sourceLabel = 'Snapshot from ' + new Date(snap.generatedAt).toLocaleString();
+        } catch(snapErr){
+          if(s.userId && s.apiKey){
+            setStatus('No snapshot found — falling back to live Brewfather fetch…', 'loading');
+            batches = await fetchAllBatches(s.userId, s.apiKey);
+            sourceLabel = 'Live';
+          } else {
+            throw new Error('No snapshot published yet, and no live credentials set. Set up the GitHub Action, or add your own key in Settings for private use.');
+          }
+        }
+      }
+
       const { historyByBeer, breweryAvg } = computeHistory(batches, s.tappedField, s.kickedField);
       const kegs = computeOnTap(batches, s.tappedField, s.kickedField, historyByBeer, breweryAvg);
       const conditioning = computeConditioning(batches, s.conditioningField, historyByBeer, breweryAvg);
@@ -1434,8 +1491,7 @@
         el.debugOutput.textContent = JSON.stringify(batches[0], null, 2);
       }
 
-      const now = new Date();
-      setStatus(batches.length + ' batches loaded · ' + kegs.length + ' on tap · ' + conditioning.length + ' conditioning · ' + fermenting.length + ' fermenting · updated ' + now.toLocaleTimeString());
+      setStatus(sourceLabel + ' · ' + batches.length + ' batches · ' + kegs.length + ' on tap · ' + conditioning.length + ' conditioning · ' + fermenting.length + ' fermenting');
     } catch(err){
       console.error(err);
       setStatus('Error: ' + err.message, 'error');
@@ -1444,13 +1500,7 @@
     }
   }
 
-  // Auto-load on start if credentials already saved
-  const initial = getSettings();
-  if(initial.userId && initial.apiKey){
-    loadAndRender();
-  } else {
-    setStatus('Not connected. Open Settings to add your Brewfather API credentials.');
-  }
+  loadAndRender();
 })();
 </script>
 
