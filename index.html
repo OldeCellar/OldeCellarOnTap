@@ -1405,14 +1405,22 @@
     if(!row || !panel) return;
     const d = row.detail;
     let lines = [];
+    const now = new Date();
     if(row.subtitle === 'Fermenting'){
-      lines.push('Brewed ' + fmtDate(d.brewDate) + ' · Schedule ' + (d.fermDays !== null ? d.fermDays + 'd' : '—'));
+      const daysSinceBrew = Math.round(daysBetween(d.brewDate, now));
+      lines.push('Brewed ' + fmtDate(d.brewDate) + ' — day ' + daysSinceBrew + ' of ' + (d.fermDays !== null ? d.fermDays + 'd fermentation' : '—'));
       lines.push('Est. fermentation complete ' + fmtDate(d.doneDate));
-      lines.push(d.readyDate ? 'Ready to tap ' + fmtDate(d.readyDate) + ' (' + d.condSource + ' conditioning time)' : 'No conditioning time available to project readiness');
+      if(d.readyDate){
+        const daysUntilTap = Math.round(daysBetween(now, d.readyDate));
+        lines.push('Ready to tap ' + fmtDate(d.readyDate) + ' (' + (daysUntilTap >= 0 ? daysUntilTap + 'd left' : Math.abs(daysUntilTap) + 'd overdue') + ') — ' + d.condSource + ' conditioning time (' + Math.round(d.condDays) + 'd)');
+      } else {
+        lines.push('No conditioning time available to project readiness');
+      }
       lines.push(d.estKickDate ? 'Projected to kick ' + fmtDate(d.estKickDate) : 'No history yet to project a kick date');
     } else if(row.subtitle === 'Conditioning'){
-      lines.push('Bottled ' + fmtDate(d.bottlingDate) + ' · Conditioning ' + (d.condDays !== null ? d.condDays + 'd' : '—'));
-      lines.push('Ready to tap ' + fmtDate(d.readyDate));
+      const daysSinceBottling = Math.round(daysBetween(d.bottlingDate, now));
+      lines.push('Bottled ' + fmtDate(d.bottlingDate) + ' — day ' + daysSinceBottling + ' of ' + (d.condDays !== null ? d.condDays + 'd conditioning' : '—'));
+      lines.push('Ready to tap ' + fmtDate(d.readyDate) + (d.daysUntilReady !== null ? ' (' + (d.daysUntilReady >= 0 ? d.daysUntilReady + 'd left' : Math.abs(d.daysUntilReady) + 'd overdue') + ')' : ''));
       lines.push(d.estKickDate ? 'Projected to kick ' + fmtDate(d.estKickDate) : 'No history yet to project a kick date');
     } else {
       lines.push('Tapped ' + fmtDate(d.tappedDate));
