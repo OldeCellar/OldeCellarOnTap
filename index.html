@@ -1010,7 +1010,7 @@
       } else if(fresh){
         badge = '<span class="keg-badge fresh">Just tapped</span>';
       } else if(k.daysRemaining !== null){
-        badge = '<span class="keg-badge">' + k.daysRemaining + 'd left</span>';
+        badge = '<span class="keg-badge">' + k.daysRemaining + '-d left</span>';
       }
 
       const remainingLabel = k.avgDays === null
@@ -1138,7 +1138,7 @@
       if(done){
         badge = '<span class="keg-badge fresh">Done fermenting</span>';
       } else if(k.daysUntilDone !== null){
-        badge = '<span class="keg-badge">' + k.daysUntilDone + ' d to go</span>';
+        badge = '<span class="keg-badge">' + k.daysUntilDone + '-d to go</span>';
       }
 
       const gaugeLabel = done ? 'fermentation complete' : (pct + '% through');
@@ -1412,7 +1412,7 @@
       lines.push('Est. fermentation complete ' + fmtDate(d.doneDate));
       if(d.readyDate){
         const daysUntilTap = Math.round(daysBetween(now, d.readyDate));
-        lines.push('Ready to tap ' + fmtDate(d.readyDate) + ' (' + (daysUntilTap >= 0 ? daysUntilTap + 'd left' : Math.abs(daysUntilTap) + 'd overdue') + ') — ' + d.condSource + ' conditioning time (' + Math.round(d.condDays) + 'd)');
+        lines.push('Ready to tap ' + fmtDate(d.readyDate) + ' (' + (daysUntilTap >= 0 ? daysUntilTap + '-d left' : Math.abs(daysUntilTap) + 'd overdue') + ') — ' + d.condSource + ' conditioning time (' + Math.round(d.condDays) + 'd)');
       } else {
         lines.push('No conditioning time available to project readiness');
       }
@@ -1420,7 +1420,7 @@
     } else if(row.subtitle === 'Conditioning'){
       const daysSinceBottling = Math.round(daysBetween(d.bottlingDate, now));
       lines.push('Bottled ' + fmtDate(d.bottlingDate) + ' — day ' + daysSinceBottling + ' of ' + (d.condDays !== null ? d.condDays + 'd conditioning' : '—'));
-      lines.push('Ready to tap ' + fmtDate(d.readyDate) + (d.daysUntilReady !== null ? ' (' + (d.daysUntilReady >= 0 ? d.daysUntilReady + 'd left' : Math.abs(d.daysUntilReady) + 'd overdue') + ')' : ''));
+      lines.push('Ready to tap ' + fmtDate(d.readyDate) + (d.daysUntilReady !== null ? ' (' + (d.daysUntilReady >= 0 ? d.daysUntilReady + '-d left' : Math.abs(d.daysUntilReady) + 'd overdue') + ')' : ''));
       lines.push(d.estKickDate ? 'Projected to kick ' + fmtDate(d.estKickDate) : 'No history yet to project a kick date');
     } else {
       lines.push('Tapped ' + fmtDate(d.tappedDate));
