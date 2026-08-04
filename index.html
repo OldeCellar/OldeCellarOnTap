@@ -1075,7 +1075,7 @@
       if(ready){
         badge = '<span class="keg-badge fresh">Ready</span>';
       } else if(k.daysUntilReady !== null){
-        badge = '<span class="keg-badge">' + k.daysUntilReady + ' d to go</span>';
+        badge = '<span class="keg-badge">' + k.daysUntilReady + '-d to go</span>';
       }
 
       const gaugeLabel = ready ? 'ready to tap' : (pct + '% conditioned');
