@@ -490,6 +490,10 @@
         <label for="conditioningFieldInput">"Conditioning Time" field name</label>
         <input id="conditioningFieldInput" type="text" value="Conditioning Time">
       </div>
+      <div class="field">
+        <label for="volOnHandDateFieldInput">"Vol On Hand Date" field name (manual recount anchor)</label>
+        <input id="volOnHandDateFieldInput" type="text" value="Vol On Hand Date">
+      </div>
     </details>
     <div class="modal-actions">
       <button class="btn ghost" id="closeSettingsBtn">Cancel</button>
@@ -509,6 +513,7 @@
     kickedField: 'ontap_field_kicked',
     volUnit: 'ontap_vol_unit',
     conditioningField: 'ontap_field_conditioning',
+    volOnHandDateField: 'ontap_field_voh_date',
     dataSource: 'ontap_data_source'
   };
 
@@ -530,6 +535,7 @@
     kickedFieldInput: document.getElementById('kickedFieldInput'),
     volUnitInput: document.getElementById('volUnitInput'),
     conditioningFieldInput: document.getElementById('conditioningFieldInput'),
+    volOnHandDateFieldInput: document.getElementById('volOnHandDateFieldInput'),
     debugPanel: document.getElementById('debugPanel'),
     debugOutput: document.getElementById('debugOutput'),
     tabbar: document.getElementById('tabbar')
@@ -612,6 +618,7 @@
       kickedField: localStorage.getItem(LS_KEYS.kickedField) || 'Date Kicked',
       volUnit: localStorage.getItem(LS_KEYS.volUnit) || 'gal',
       conditioningField: localStorage.getItem(LS_KEYS.conditioningField) || 'Conditioning Time',
+      volOnHandDateField: localStorage.getItem(LS_KEYS.volOnHandDateField) || 'Vol On Hand Date',
       dataSource: localStorage.getItem(LS_KEYS.dataSource) || 'auto'
     };
   }
@@ -625,6 +632,7 @@
     el.kickedFieldInput.value = s.kickedField;
     el.volUnitInput.value = s.volUnit;
     el.conditioningFieldInput.value = s.conditioningField;
+    el.volOnHandDateFieldInput.value = s.volOnHandDateField;
     el.settingsOverlay.style.display = 'flex';
   }
   function closeSettings(){ el.settingsOverlay.style.display = 'none'; }
@@ -640,6 +648,7 @@
     localStorage.setItem(LS_KEYS.kickedField, el.kickedFieldInput.value.trim() || 'Date Kicked');
     localStorage.setItem(LS_KEYS.volUnit, el.volUnitInput.value.trim() || 'gal');
     localStorage.setItem(LS_KEYS.conditioningField, el.conditioningFieldInput.value.trim() || 'Conditioning Time');
+    localStorage.setItem(LS_KEYS.volOnHandDateField, el.volOnHandDateFieldInput.value.trim() || 'Vol On Hand Date');
     closeSettings();
     loadAndRender();
   });
@@ -931,10 +940,13 @@
 
   // Projects a running Vol On Hand per currently/recently-tapped batch, keyed by
   // Brewfather batch ID (not beer name) so overlapping batches of the same beer
-  // never bleed into each other. Anchor = Vol Kegged at Date Tapped; drawn down =
-  // sum of Request Log volume for that beer, dated between Date Tapped and
-  // (Date Kicked or today).
-  function computeVolOnHand(batches, tappedFieldName, kickedFieldName, requestRows){
+  // never bleed into each other. Anchor is either:
+  //   - manual: "Vol On Hand" + "Vol On Hand Date" custom fields, when both are set
+  //     (set these together after a physical recount to correct drift), or
+  //   - auto: Vol Kegged at Date Tapped, as a fallback
+  // Drawn down = sum of Request Log volume for that beer, dated after the anchor
+  // date through (Date Kicked or today).
+  function computeVolOnHand(batches, tappedFieldName, kickedFieldName, volOnHandDateFieldName, requestRows){
     const results = [];
     for(const b of batches){
       if(b.status !== 'Completed') continue;
@@ -949,22 +961,38 @@
         results.push({
           batchId, name, batchNumber: b.batchNo || b.batchNumber || null,
           tappedDate, kickedDate, volKegged,
+          anchorDate: tappedDate, anchorVolume: volKegged, anchorIsManual: false,
           drawnDown: null, remaining: 0, requestCount: 0, kicked: true
         });
         continue;
       }
 
+      // Manual recount anchor, if both fields are set on this batch
+      const manualVolRaw = findMeasuredField(b, 'Vol On Hand');
+      const manualVol = (typeof manualVolRaw === 'number') ? manualVolRaw : (manualVolRaw ? Number(manualVolRaw) : null);
+      const manualDate = parseBFValue(findMeasuredField(b, volOnHandDateFieldName));
+
+      let anchorDate = tappedDate;
+      let anchorVolume = volKegged;
+      let anchorIsManual = false;
+      if(manualDate && manualVol !== null && !isNaN(manualVol) && manualDate >= tappedDate){
+        anchorDate = manualDate;
+        anchorVolume = manualVol;
+        anchorIsManual = true;
+      }
+
       const windowEnd = new Date();
       const matches = requestRows.filter(r =>
         r.beer.trim().toLowerCase() === name.trim().toLowerCase() &&
-        r.date >= tappedDate && r.date <= windowEnd
+        r.date > anchorDate && r.date <= windowEnd
       );
       const drawnDown = matches.reduce((sum, r) => sum + r.volume, 0);
-      const remaining = (volKegged !== null) ? (volKegged - drawnDown) : null;
+      const remaining = (anchorVolume !== null) ? (anchorVolume - drawnDown) : null;
 
       results.push({
         batchId, name, batchNumber: b.batchNo || b.batchNumber || null,
         tappedDate, kickedDate: null, volKegged,
+        anchorDate, anchorVolume, anchorIsManual,
         drawnDown, remaining, requestCount: matches.length, kicked: false
       });
     }
@@ -1203,11 +1231,14 @@
         mathHtml =
           '<div class="voh-row"><span>Anchor (Vol Kegged)</span><b>' + (k.volKegged !== null ? k.volKegged.toFixed(2) + ' L' : '—') + '</b></div>' +
           '<div class="voh-row total"><span>Vol On Hand</span><b>0.00 L</b></div>';
-      } else if(k.volKegged === null){
-        mathHtml = '<div class="voh-row warn"><span>No Vol Kegged on this batch — can\'t project.</span></div>';
+      } else if(k.anchorVolume === null){
+        mathHtml = '<div class="voh-row warn"><span>No Vol Kegged (or manual recount) on this batch — can\'t project.</span></div>';
       } else {
+        const anchorLabel = k.anchorIsManual
+          ? 'Anchor (manual recount, ' + fmtDate(k.anchorDate) + ')'
+          : 'Anchor (Vol Kegged, tapped ' + fmtDate(k.anchorDate) + ')';
         mathHtml =
-          '<div class="voh-row"><span>Anchor (Vol Kegged, tapped ' + fmtDate(k.tappedDate) + ')</span><b>' + k.volKegged.toFixed(2) + ' L</b></div>' +
+          '<div class="voh-row"><span>' + anchorLabel + '</span><b>' + k.anchorVolume.toFixed(2) + ' L</b></div>' +
           '<div class="voh-row"><span>Drawn down (' + k.requestCount + ' request' + (k.requestCount === 1 ? '' : 's') + ')</span><b>−' + k.drawnDown.toFixed(2) + ' L</b></div>' +
           '<div class="voh-row total' + (over ? ' warn' : '') + '"><span>Vol On Hand' + (over ? ' (over-drawn?)' : '') + '</span><b>' + k.remaining.toFixed(2) + ' L</b></div>';
       }
@@ -1678,7 +1709,7 @@
       let volOnHand = [];
       try{
         const requestRows = await fetchRequestRows();
-        volOnHand = computeVolOnHand(batches, s.tappedField, s.kickedField, requestRows);
+        volOnHand = computeVolOnHand(batches, s.tappedField, s.kickedField, s.volOnHandDateField, requestRows);
       } catch(reqErr){
         console.error(reqErr);
         requestLogError = reqErr.message;
