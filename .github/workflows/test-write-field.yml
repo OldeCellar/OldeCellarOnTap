@@ -1,0 +1,35 @@
+name: Test Write Custom Field
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_name:
+        description: "Batch name to test, for example MaiBock"
+        required: true
+        default: "MaiBock"
+      field_name:
+        description: "Field name to test, for example Vol On Hand"
+        required: true
+        default: "Vol On Hand"
+      new_value:
+        description: "New value to write. Leave blank for a safe identity test (same value, timestamp only)"
+        required: false
+        default: ""
+
+jobs:
+  test-write:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run test-write-field.mjs
+        env:
+          BF_USER_ID: ${{ secrets.BF_USER_ID }}
+          BF_API_KEY: ${{ secrets.BF_API_KEY }}
+        run: node scripts/test-write-field.mjs "${{ github.event.inputs.batch_name }}" "${{ github.event.inputs.field_name }}" "${{ github.event.inputs.new_value }}"
