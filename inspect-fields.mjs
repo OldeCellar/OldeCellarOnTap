@@ -6,7 +6,7 @@ on:
       batch_name:
         description: "Batch name to inspect, for example Pliny the Elder"
         required: true
-        default: "Pliny the Elder"
+        default: "MaiBock"
 
 jobs:
   inspect:
