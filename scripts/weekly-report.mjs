@@ -239,7 +239,7 @@ async function main() {
 
   const emailPayload = {
     personalizations: [personalization],
-    from: { email: 'oldecellarbrewing@gmail.com', name: 'Olde Cellar Brewing' },
+    from: { email: 'jeffherr@ccimail.com', name: 'Olde Cellar Brewing' },
     subject,
     content: [{ type: 'text/html', value: html }]
   };
