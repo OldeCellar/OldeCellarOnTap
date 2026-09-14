@@ -486,7 +486,7 @@
       </div>
       <div class="field">
         <label for="volUnitInput">Volume unit label (display only)</label>
-        <input id="volUnitInput" type="text" value="gal">
+        <input id="volUnitInput" type="text" value="Liters">
       </div>
       <div class="field">
         <label for="conditioningFieldInput">"Conditioning Time" field name</label>
@@ -618,7 +618,7 @@
       apiKey: localStorage.getItem(LS_KEYS.apiKey) || '',
       tappedField: localStorage.getItem(LS_KEYS.tappedField) || 'Date Tapped',
       kickedField: localStorage.getItem(LS_KEYS.kickedField) || 'Date Kicked',
-      volUnit: localStorage.getItem(LS_KEYS.volUnit) || 'gal',
+      volUnit: localStorage.getItem(LS_KEYS.volUnit) || 'Liters',
       conditioningField: localStorage.getItem(LS_KEYS.conditioningField) || 'Conditioning Time',
       volOnHandDateField: localStorage.getItem(LS_KEYS.volOnHandDateField) || 'Vol On Hand Date',
       dataSource: localStorage.getItem(LS_KEYS.dataSource) || 'auto'
@@ -648,7 +648,7 @@
     localStorage.setItem(LS_KEYS.apiKey, el.apiKeyInput.value.trim());
     localStorage.setItem(LS_KEYS.tappedField, el.tappedFieldInput.value.trim() || 'Date Tapped');
     localStorage.setItem(LS_KEYS.kickedField, el.kickedFieldInput.value.trim() || 'Date Kicked');
-    localStorage.setItem(LS_KEYS.volUnit, el.volUnitInput.value.trim() || 'gal');
+    localStorage.setItem(LS_KEYS.volUnit, el.volUnitInput.value.trim() || 'Liters');
     localStorage.setItem(LS_KEYS.conditioningField, el.conditioningFieldInput.value.trim() || 'Conditioning Time');
     localStorage.setItem(LS_KEYS.volOnHandDateField, el.volOnHandDateFieldInput.value.trim() || 'Vol On Hand Date');
     closeSettings();
