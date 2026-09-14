@@ -8,13 +8,14 @@
 //
 // Does NOT write anything to Brewfather or to the Google Sheet.
 //
-// Email is sent via the Resend API (https://resend.com) rather than
-// Gmail directly, since Gmail requires 2-Step Verification to generate
-// an App Password. No nodemailer/SMTP needed -- just a plain HTTP call.
+// Email is sent via the SendGrid API (https://sendgrid.com) using a
+// verified "Single Sender" -- this lets the email come from
+// oldecellarbrewing@gmail.com and go to any recipient, with no domain
+// purchase and no 2-Step Verification needed anywhere.
 //
 // Required environment variables:
 //   BF_USER_ID, BF_API_KEY       - Brewfather API credentials (existing)
-//   RESEND_API_KEY               - API key from resend.com
+//   SENDGRID_API_KEY             - API key from sendgrid.com
 //   EMAIL_TO                     - comma-separated recipient(s)
 //   EMAIL_CC                     - comma-separated cc recipient(s) (optional)
 
@@ -29,12 +30,12 @@ const SIXPACK_LITERS = 6 * BOTTLE_LITERS; // 2.07L
 const {
   BF_USER_ID,
   BF_API_KEY,
-  RESEND_API_KEY,
+  SENDGRID_API_KEY,
   EMAIL_TO,
   EMAIL_CC
 } = process.env;
 
-for (const [name, val] of Object.entries({ BF_USER_ID, BF_API_KEY, RESEND_API_KEY, EMAIL_TO })) {
+for (const [name, val] of Object.entries({ BF_USER_ID, BF_API_KEY, SENDGRID_API_KEY, EMAIL_TO })) {
   if (!val) {
     console.error(`Missing required environment variable: ${name}`);
     process.exit(1);
@@ -230,21 +231,23 @@ async function main() {
     }
   }
 
-  const emailPayload = {
-    from: 'Olde Cellar Brewing <onboarding@resend.dev>',
-    reply_to: 'oldecellarbrewing@gmail.com',
-    to: EMAIL_TO.split(',').map(s => s.trim()).filter(Boolean),
-    subject,
-    html
-  };
-  if (EMAIL_CC) {
-    emailPayload.cc = EMAIL_CC.split(',').map(s => s.trim()).filter(Boolean);
-  }
+  const toList = EMAIL_TO.split(',').map(s => s.trim()).filter(Boolean).map(email => ({ email }));
+  const ccList = EMAIL_CC ? EMAIL_CC.split(',').map(s => s.trim()).filter(Boolean).map(email => ({ email })) : undefined;
 
-  const sendRes = await fetch('https://api.resend.com/emails', {
+  const personalization = { to: toList };
+  if (ccList && ccList.length > 0) personalization.cc = ccList;
+
+  const emailPayload = {
+    personalizations: [personalization],
+    from: { email: 'oldecellarbrewing@gmail.com', name: 'Olde Cellar Brewing' },
+    subject,
+    content: [{ type: 'text/html', value: html }]
+  };
+
+  const sendRes = await fetch('https://api.sendgrid.com/v3/mail/send', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
+      Authorization: `Bearer ${SENDGRID_API_KEY}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(emailPayload)
@@ -252,7 +255,7 @@ async function main() {
 
   if (!sendRes.ok) {
     const errBody = await sendRes.text();
-    throw new Error(`Resend email failed: ${sendRes.status} ${sendRes.statusText} - ${errBody}`);
+    throw new Error(`SendGrid email failed: ${sendRes.status} ${sendRes.statusText} - ${errBody}`);
   }
 
   console.log('Report emailed successfully.');
