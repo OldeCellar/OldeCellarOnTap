@@ -2,9 +2,12 @@ name: Weekly Vol On Hand Report
 
 on:
   schedule:
-    # Every Sunday at 8:00 PM UTC. Adjust the hour to fit your timezone --
-    # UTC is 4-5 hours ahead of US Eastern depending on daylight saving.
-    - cron: '0 20 * * 0'
+    # Every Saturday at 7:00 AM Eastern. GitHub Actions cron always runs
+    # in UTC, and Eastern is UTC-4 during daylight saving (roughly March
+    # to early November) and UTC-5 the rest of the year. This is set for
+    # daylight saving time (11:00 UTC = 7:00 AM EDT); during standard
+    # time it'll actually fire at 6:00 AM Eastern instead of 7:00.
+    - cron: '0 11 * * 6'
   workflow_dispatch: {}
 
 jobs:
