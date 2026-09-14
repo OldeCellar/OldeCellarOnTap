@@ -1,0 +1,29 @@
+name: Weekly Vol On Hand Report
+
+on:
+  schedule:
+    # Every Sunday at 8:00 PM UTC. Adjust the hour to fit your timezone --
+    # UTC is 4-5 hours ahead of US Eastern depending on daylight saving.
+    - cron: '0 20 * * 0'
+  workflow_dispatch: {}
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run weekly-report.mjs
+        env:
+          BF_USER_ID: ${{ secrets.BF_USER_ID }}
+          BF_API_KEY: ${{ secrets.BF_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_TO: ${{ vars.EMAIL_TO }}
+          EMAIL_CC: ${{ vars.EMAIL_CC }}
+        run: node scripts/weekly-report.mjs
