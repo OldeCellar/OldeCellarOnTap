@@ -23,7 +23,7 @@ jobs:
         env:
           BF_USER_ID: ${{ secrets.BF_USER_ID }}
           BF_API_KEY: ${{ secrets.BF_API_KEY }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
           EMAIL_TO: ${{ vars.EMAIL_TO }}
           EMAIL_CC: ${{ vars.EMAIL_CC }}
         run: node scripts/weekly-report.mjs
