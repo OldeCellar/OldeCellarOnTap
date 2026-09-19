@@ -74,13 +74,28 @@ function parseRequestCSV(text) {
 
 function parseRequestMDY(str) {
   if (!str) return null;
-  const parts = str.trim().split(/[\/\-]/);
-  if (parts.length !== 3) return null;
-  let [m, d, y] = parts.map(s => parseInt(s, 10));
-  if (!m || !d || !y) return null;
-  if (y < 100) y += 2000;
+
+  const value = String(str).trim();
+
+  // Require exactly 8 digits: MMDDYYYY
+  if (!/^\d{8}$/.test(value)) return null;
+
+  const m = Number(value.slice(0, 2));
+  const d = Number(value.slice(2, 4));
+  const y = Number(value.slice(4, 8));
+
   const dt = new Date(y, m - 1, d);
-  return isNaN(dt.getTime()) ? null : dt;
+
+  // Reject invalid calendar dates and invalid months
+  if (
+    dt.getFullYear() !== y ||
+    dt.getMonth() !== m - 1 ||
+    dt.getDate() !== d
+  ) {
+    return null;
+  }
+
+  return dt;
 }
 
 async function fetchRequestRows() {
