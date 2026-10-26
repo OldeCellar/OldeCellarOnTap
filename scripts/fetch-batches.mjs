@@ -10,7 +10,10 @@
 
 import { writeFileSync, mkdirSync } from 'fs';
 
-const FIELD_NAMES = ['Date Tapped', 'Date Kicked', 'Vol On Hand', 'Conditioning Time'];
+const FIELD_NAMES = [
+  'Date Tapped', 'Date Kicked', 'Vol On Hand', 'Vol On Hand Date', 'Conditioning Time',
+  'Vol To Kegerator', 'Date Into Kegerator', 'Date Kicked From Kegerator', 'Kegerator Tap Number'
+];
 
 const userId = process.env.BF_USER_ID;
 const apiKey = process.env.BF_API_KEY;
