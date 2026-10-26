@@ -73,29 +73,21 @@ function parseRequestCSV(text) {
 }
 
 function parseRequestMDY(str) {
+  // Accepts 10/15/2026, 10-15-26 and 10152026. (The old version only accepted the 8-digit form, which dropped every
+  // request row because the Request View sheet writes dates with slashes.)
   if (!str) return null;
-
-  const value = String(str).trim();
-
-  // Require exactly 8 digits: MMDDYYYY
-  if (!/^\d{8}$/.test(value)) return null;
-
-  const m = Number(value.slice(0, 2));
-  const d = Number(value.slice(2, 4));
-  const y = Number(value.slice(4, 8));
-
-  const dt = new Date(y, m - 1, d);
-
-  // Reject invalid calendar dates and invalid months
-  if (
-    dt.getFullYear() !== y ||
-    dt.getMonth() !== m - 1 ||
-    dt.getDate() !== d
-  ) {
-    return null;
+  const v = String(str).trim();
+  if (/^\d{8}$/.test(v)) {
+    const m = +v.slice(0, 2), d = +v.slice(2, 4), y = +v.slice(4, 8), dt = new Date(y, m - 1, d);
+    return (dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d) ? dt : null;
   }
-
-  return dt;
+  const p = v.split(/[\/\-]/);
+  if (p.length !== 3) return null;
+  let [m, d, y] = p.map(x => parseInt(x, 10));
+  if (!m || !d || !y) return null;
+  if (y < 100) y += 2000;
+  const dt = new Date(y, m - 1, d);
+  return isNaN(dt.getTime()) ? null : dt;
 }
 
 async function fetchRequestRows() {
