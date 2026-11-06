@@ -492,10 +492,6 @@
         <label for="conditioningFieldInput">"Conditioning Time" field name</label>
         <input id="conditioningFieldInput" type="text" value="Conditioning Time">
       </div>
-      <div class="field">
-        <label for="volOnHandDateFieldInput">"Vol On Hand Date" field name (manual recount anchor)</label>
-        <input id="volOnHandDateFieldInput" type="text" value="Vol On Hand Date">
-      </div>
     </details>
     <div class="modal-actions">
       <button class="btn ghost" id="closeSettingsBtn">Cancel</button>
@@ -515,12 +511,11 @@
     kickedField: 'ontap_field_kicked',
     volUnit: 'ontap_vol_unit',
     conditioningField: 'ontap_field_conditioning',
-    volOnHandDateField: 'ontap_field_voh_date',
     dataSource: 'ontap_data_source'
   };
 
   let currentTab = 'ontap';
-  let lastComputed = null; // { kegs, conditioning }
+  let lastComputed = null; // latest computed brewery and current-inventory data
 
   const el = {
     statusLine: document.getElementById('statusLine'),
@@ -537,7 +532,6 @@
     kickedFieldInput: document.getElementById('kickedFieldInput'),
     volUnitInput: document.getElementById('volUnitInput'),
     conditioningFieldInput: document.getElementById('conditioningFieldInput'),
-    volOnHandDateFieldInput: document.getElementById('volOnHandDateFieldInput'),
     debugPanel: document.getElementById('debugPanel'),
     debugOutput: document.getElementById('debugOutput'),
     tabbar: document.getElementById('tabbar')
@@ -545,14 +539,13 @@
 
   const TAP_COLORS = ['#c1861f', '#a8501f', '#4d7654', '#3f6f95', '#8a4f95', '#8a7519'];
 
-  // ---------- Request Log integration (public "Olde Cellar – Public View" sheet) ----------
-  const REQUEST_SHEET_ID = "1bbU3rU6K7-t5n1jnE6USjTngIFBTJEoAYgKQvsdlPMk";
-  const REQUEST_GID = "0";
-  const REQUEST_CSV_URL = 'https://docs.google.com/spreadsheets/d/' + REQUEST_SHEET_ID + '/gviz/tq?tqx=out:csv&gid=' + REQUEST_GID;
-  const GROWLER_L = 1.95;
-  const SIXPACK_L = 6 * 0.345; // 2.07
+  // ---------- Current inventory feed (sanitized public view of Settings!H:K) ----------
+  const INVENTORY_SHEET_ID = "1bbU3rU6K7-t5n1jnE6USjTngIFBTJEoAYgKQvsdlPMk";
+  const INVENTORY_GID = "1671730428";
+  const INVENTORY_CSV_URL = 'https://docs.google.com/spreadsheets/d/' + INVENTORY_SHEET_ID + '/gviz/tq?tqx=out:csv&gid=' + INVENTORY_GID;
 
-  function parseRequestCSV(text){
+  // CSV parser that correctly handles quoted cells and commas inside dates/text.
+  function parseInventoryCSV(text){
     const rows = [];
     let row = [], field = "", inQuotes = false;
     for(let i=0;i<text.length;i++){
@@ -574,42 +567,64 @@
     return rows;
   }
 
-  function parseRequestMDY(str){
-    if(!str) return null;
-    const parts = str.trim().split(/[\/\-]/);
-    if(parts.length !== 3) return null;
-    let [m, d, y] = parts.map(s => parseInt(s, 10));
-    if(!m || !d || !y) return null;
-    if(y < 100) y += 2000;
-    const dt = new Date(y, m - 1, d);
-    return isNaN(dt.getTime()) ? null : dt;
-  }
+  async function fetchInventoryRows(){
+    const resp = await fetch(INVENTORY_CSV_URL, { cache: "no-store" });
+    if(!resp.ok) throw new Error('Current Inventory HTTP ' + resp.status);
 
-  async function fetchRequestRows(){
-    const resp = await fetch(REQUEST_CSV_URL, { cache: "no-store" });
-    if(!resp.ok) throw new Error('Request Log HTTP ' + resp.status);
-    const text = await resp.text();
-    const table = parseRequestCSV(text);
+    const table = parseInventoryCSV(await resp.text());
     if(!table.length) return [];
 
-    // detect header row (skip if first row's column D doesn't look like a date)
-    let startIdx = 0;
-    const first = table[0];
-    if(first[3] !== undefined && parseRequestMDY(first[3]) === null) startIdx = 1;
+    const headers = table[0].map(v => String(v || '').trim().toLowerCase());
+    const nameIdx = headers.findIndex(v => v === 'on tap' || v.includes('on tap'));
+    const dateIdx = headers.findIndex(v => v.includes('inventory date'));
+    const volumeIdx = headers.findIndex(v => v.includes('vol in kegs') || v === 'volume');
+    const batchIdx = headers.findIndex(v => v.includes('batch'));
+
+    if(nameIdx < 0 || dateIdx < 0 || volumeIdx < 0 || batchIdx < 0){
+      throw new Error('The Current Inventory tab must have the headers On Tap, Inventory Date, Vol in kegs, and Batch # in columns A:D.');
+    }
 
     const rows = [];
-    for(let i = startIdx; i < table.length; i++){
+    for(let i = 1; i < table.length; i++){
       const r = table[i];
-      if(!r || r.length < 4) continue;
-      const beer = (r[0] || "").trim();
-      const growlers = parseInt(r[1], 10) || 0;
-      const sixpacks = parseInt(r[2], 10) || 0;
-      const dt = parseRequestMDY(r[3]);
-      if(!beer || !dt) continue;
-      const volume = growlers * GROWLER_L + sixpacks * SIXPACK_L;
-      rows.push({ beer, growlers, sixpacks, date: dt, volume });
+      if(!r) continue;
+      const name = String(r[nameIdx] || '').trim();
+      if(!name) continue;
+
+      const rawVolume = String(r[volumeIdx] ?? '').trim();
+      const cleanedVolume = rawVolume.replace(/,/g, '').replace(/[^0-9.+-]/g, '');
+      const volume = rawVolume === '' || cleanedVolume === '' ? null : Number(cleanedVolume);
+
+      rows.push({
+        name: normalizeBeerName(name),
+        inventoryDate: String(r[dateIdx] || '').trim(),
+        volume: (volume !== null && Number.isFinite(volume)) ? volume : null,
+        batchNumber: String(r[batchIdx] || '').trim()
+      });
     }
     return rows;
+  }
+
+  function normalizeBatchNumber(value){
+    return String(value ?? '').trim().replace(/^#/, '').toLowerCase();
+  }
+
+  // Match by batch number first. Fall back to beer name only when one side
+  // has no batch number and the name match is unique.
+  function findInventoryRow(inventoryRows, batchNumber, beerName){
+    const batchKey = normalizeBatchNumber(batchNumber);
+    const beerKey = normalizeBeerName(beerName).toLowerCase();
+    const beerMatches = inventoryRows.filter(r => normalizeBeerName(r.name).toLowerCase() === beerKey);
+
+    if(batchKey){
+      const batchMatches = inventoryRows.filter(r => normalizeBatchNumber(r.batchNumber) === batchKey);
+      if(batchMatches.length === 1) return batchMatches[0];
+      if(batchMatches.length > 1) return null;
+      const missingBatchMatches = beerMatches.filter(r => !normalizeBatchNumber(r.batchNumber));
+      return missingBatchMatches.length === 1 ? missingBatchMatches[0] : null;
+    }
+
+    return beerMatches.length === 1 ? beerMatches[0] : null;
   }
 
   function getSettings(){
@@ -620,7 +635,6 @@
       kickedField: localStorage.getItem(LS_KEYS.kickedField) || 'Date Kicked',
       volUnit: localStorage.getItem(LS_KEYS.volUnit) || 'Liters',
       conditioningField: localStorage.getItem(LS_KEYS.conditioningField) || 'Conditioning Time',
-      volOnHandDateField: localStorage.getItem(LS_KEYS.volOnHandDateField) || 'Vol On Hand Date',
       dataSource: localStorage.getItem(LS_KEYS.dataSource) || 'auto'
     };
   }
@@ -634,7 +648,6 @@
     el.kickedFieldInput.value = s.kickedField;
     el.volUnitInput.value = s.volUnit;
     el.conditioningFieldInput.value = s.conditioningField;
-    el.volOnHandDateFieldInput.value = s.volOnHandDateField;
     el.settingsOverlay.style.display = 'flex';
   }
   function closeSettings(){ el.settingsOverlay.style.display = 'none'; }
@@ -650,7 +663,6 @@
     localStorage.setItem(LS_KEYS.kickedField, el.kickedFieldInput.value.trim() || 'Date Kicked');
     localStorage.setItem(LS_KEYS.volUnit, el.volUnitInput.value.trim() || 'Liters');
     localStorage.setItem(LS_KEYS.conditioningField, el.conditioningFieldInput.value.trim() || 'Conditioning Time');
-    localStorage.setItem(LS_KEYS.volOnHandDateField, el.volOnHandDateFieldInput.value.trim() || 'Vol On Hand Date');
     closeSettings();
     loadAndRender();
   });
@@ -828,6 +840,14 @@
     return MONTH_ABBR[d.getMonth()] + ' ' + day + ' ' + d.getFullYear();
   }
 
+  function fmtDateTime(value){
+    if(!value) return '—';
+    const d = (value instanceof Date) ? value : parseBFValue(value);
+    return d
+      ? d.toLocaleString(undefined, { month: 'short', day: '2-digit', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+      : String(value);
+  }
+
   // ---------- Core computation ----------
 
   function lookupAvgDuration(name, historyByBeer, breweryAvg){
@@ -885,7 +905,7 @@
     return { byBeer, breweryAvg };
   }
 
-  function computeOnTap(batches, tappedFieldName, kickedFieldName, historyByBeer, breweryAvg){
+  function computeOnTap(batches, tappedFieldName, kickedFieldName, historyByBeer, breweryAvg, inventoryRows){
     const currentlyTapped = []; // { name, tappedDate, batchNumber }
 
     for(const b of batches){
@@ -896,14 +916,15 @@
       if(tappedDate && !kickedDate){
         // Completed status + tapped + not yet kicked = currently pouring
         const volKegged = (typeof b.measuredBottlingSize === 'number') ? b.measuredBottlingSize : null;
-        const volOnHandNode = findMeasuredField(b, 'Vol On Hand');
-        const volOnHand = (typeof volOnHandNode === 'number') ? volOnHandNode : (volOnHandNode ? Number(volOnHandNode) : null);
+        const batchNumber = b.batchNo || b.batchNumber || null;
+        const inventory = findInventoryRow(inventoryRows || [], batchNumber, name);
         currentlyTapped.push({
           name,
           tappedDate,
-          batchNumber: b.batchNo || b.batchNumber || null,
+          batchNumber,
           volKegged,
-          volOnHand: (volOnHand !== null && !isNaN(volOnHand)) ? volOnHand : null
+          volOnHand: inventory ? inventory.volume : null,
+          inventoryDate: inventory ? inventory.inventoryDate : null
         });
       }
     }
@@ -922,6 +943,7 @@
         tappedDate: k.tappedDate,
         volKegged: k.volKegged,
         volOnHand: k.volOnHand,
+        inventoryDate: k.inventoryDate,
         avgDays,
         usedFallback,
         historyCount,
@@ -940,70 +962,46 @@
     return kegs;
   }
 
-  // Projects a running Vol On Hand per currently/recently-tapped batch, keyed by
-  // Brewfather batch ID (not beer name) so overlapping batches of the same beer
-  // never bleed into each other. Anchor is either:
-  //   - manual: "Vol On Hand" + "Vol On Hand Date" custom fields, when both are set
-  //     (set these together after a physical recount to correct drift), or
-  //   - auto: Vol Kegged at Date Tapped, as a fallback
-  // Drawn down = sum of Request Log volume for that beer, dated after the anchor
-  // date through (Date Kicked or today).
-  function computeVolOnHand(batches, tappedFieldName, kickedFieldName, volOnHandDateFieldName, requestRows){
-    const results = [];
-    for(const b of batches){
-      if(b.status !== 'Completed') continue;
+  // Settings is now the source of truth for current volume. Do not subtract
+  // Request Log rows here: Apps Script already deducts each accepted request.
+  function computeVolOnHand(batches, tappedFieldName, kickedFieldName, inventoryRows){
+    const activeBatches = batches.filter(b => {
+      if(b.status !== 'Completed') return false;
       const tappedDate = parseBFValue(findMeasuredField(b, tappedFieldName));
-      if(!tappedDate) continue; // never tapped — nothing to project
       const kickedDate = parseBFValue(findMeasuredField(b, kickedFieldName));
-      const name = normalizeBeerName(getRecipeName(b));
-      const volKegged = (typeof b.measuredBottlingSize === 'number') ? b.measuredBottlingSize : null;
-      const batchId = b._id || (b.batchNo != null ? ('batchno-' + b.batchNo) : (name + '-' + tappedDate.getTime()));
-
-      if(kickedDate){
-        results.push({
-          batchId, name, batchNumber: b.batchNo || b.batchNumber || null,
-          tappedDate, kickedDate, volKegged,
-          anchorDate: tappedDate, anchorVolume: volKegged, anchorIsManual: false,
-          drawnDown: null, remaining: 0, requestCount: 0, kicked: true
-        });
-        continue;
-      }
-
-      // Manual recount anchor, if both fields are set on this batch
-      const manualVolRaw = findMeasuredField(b, 'Vol On Hand');
-      const manualVol = (typeof manualVolRaw === 'number') ? manualVolRaw : (manualVolRaw ? Number(manualVolRaw) : null);
-      const manualDate = parseBFValue(findMeasuredField(b, volOnHandDateFieldName));
-
-      let anchorDate = tappedDate;
-      let anchorVolume = volKegged;
-      let anchorIsManual = false;
-      if(manualDate && manualVol !== null && !isNaN(manualVol) && manualDate >= tappedDate){
-        anchorDate = manualDate;
-        anchorVolume = manualVol;
-        anchorIsManual = true;
-      }
-
-      const windowEnd = new Date();
-      const matches = requestRows.filter(r =>
-        r.beer.trim().toLowerCase() === name.trim().toLowerCase() &&
-        r.date > anchorDate && r.date <= windowEnd
-      );
-      const drawnDown = matches.reduce((sum, r) => sum + r.volume, 0);
-      const remaining = (anchorVolume !== null) ? (anchorVolume - drawnDown) : null;
-
-      results.push({
-        batchId, name, batchNumber: b.batchNo || b.batchNumber || null,
-        tappedDate, kickedDate: null, volKegged,
-        anchorDate, anchorVolume, anchorIsManual,
-        drawnDown, remaining, requestCount: matches.length, kicked: false
-      });
-    }
-
-    results.sort((a,b) => {
-      if(a.kicked !== b.kicked) return a.kicked ? 1 : -1;
-      return b.tappedDate.getTime() - a.tappedDate.getTime();
+      return !!tappedDate && !kickedDate;
     });
 
+    const results = (inventoryRows || []).map(row => {
+      let matchedBatch = null;
+      const inventoryBatchKey = normalizeBatchNumber(row.batchNumber);
+      if(inventoryBatchKey){
+        const batchMatches = activeBatches.filter(b => {
+          const batchNumber = b.batchNo || b.batchNumber || null;
+          return normalizeBatchNumber(batchNumber) === inventoryBatchKey;
+        });
+        if(batchMatches.length === 1) matchedBatch = batchMatches[0];
+      } else {
+        const beerMatches = activeBatches.filter(b =>
+          normalizeBeerName(getRecipeName(b)).toLowerCase() === normalizeBeerName(row.name).toLowerCase()
+        );
+        if(beerMatches.length === 1) matchedBatch = beerMatches[0];
+      }
+
+      const tappedDate = matchedBatch
+        ? parseBFValue(findMeasuredField(matchedBatch, tappedFieldName))
+        : null;
+
+      return {
+        name: row.name,
+        batchNumber: row.batchNumber || (matchedBatch ? (matchedBatch.batchNo || matchedBatch.batchNumber || null) : null),
+        tappedDate,
+        inventoryDate: row.inventoryDate,
+        volume: row.volume
+      };
+    });
+
+    results.sort((a,b) => a.name.localeCompare(b.name));
     return results;
   }
 
@@ -1207,53 +1205,37 @@
     el.content.innerHTML = '<div class="grid">' + cards + '</div>';
   }
 
-  function renderVolOnHand(list, requestLogError){
-    if(requestLogError){
+  function renderVolOnHand(list, inventoryError){
+    if(inventoryError){
       el.content.innerHTML =
-        '<div class="empty-state"><strong>Couldn\'t load the Request Log</strong>' +
-        escapeHtml(requestLogError) + '<br>Vol On Hand needs both Brewfather batch data and the Request Log sheet to compute.</div>';
+        '<div class="empty-state"><strong>Could not load Current Inventory</strong>' +
+        escapeHtml(inventoryError) + '<br>Check that the Current Inventory tab is available in the public-view spreadsheet.</div>';
       return;
     }
     if(list.length === 0){
       el.content.innerHTML =
-        '<div class="empty-state"><strong>Nothing to project yet</strong>' +
-        'No Completed batches have a ' + '"' + getSettings().tappedField + '"' + ' date.</div>';
+        '<div class="empty-state"><strong>No current inventory rows found</strong>' +
+        'The Current Inventory tab does not currently contain any beer rows.</div>';
       return;
     }
 
     const cards = list.map(k => {
       const color = colorForBeer(k.name);
-      let badge = k.kicked
-        ? '<span class="keg-badge kicked">Kicked ' + fmtDate(k.kickedDate) + '</span>'
-        : '';
-      const over = (k.remaining !== null && k.remaining < 0);
-
-      let mathHtml;
-      if(k.kicked){
-        mathHtml =
-          '<div class="voh-row"><span>Anchor (Vol Kegged)</span><b>' + (k.volKegged !== null ? k.volKegged.toFixed(2) + ' L' : '—') + '</b></div>' +
-          '<div class="voh-row total"><span>Vol On Hand</span><b>0.00 L</b></div>';
-      } else if(k.anchorVolume === null){
-        mathHtml = '<div class="voh-row warn"><span>No Vol Kegged (or manual recount) on this batch — can\'t project.</span></div>';
-      } else {
-        const anchorLabel = k.anchorIsManual
-          ? 'Anchor (manual recount, ' + fmtDate(k.anchorDate) + ')'
-          : 'Anchor (Vol Kegged, tapped ' + fmtDate(k.anchorDate) + ')';
-        mathHtml =
-          '<div class="voh-row"><span>' + anchorLabel + '</span><b>' + k.anchorVolume.toFixed(2) + ' L</b></div>' +
-          '<div class="voh-row"><span>Drawn down (' + k.requestCount + ' request' + (k.requestCount === 1 ? '' : 's') + ')</span><b>−' + k.drawnDown.toFixed(2) + ' L</b></div>' +
-          '<div class="voh-row total' + (over ? ' warn' : '') + '"><span>Vol On Hand' + (over ? ' (over-drawn?)' : '') + '</span><b>' + k.remaining.toFixed(2) + ' L</b></div>';
-      }
+      const volumeText = (k.volume !== null && Number.isFinite(k.volume)) ? k.volume.toFixed(2) + ' L' : '—';
+      const tappedText = k.tappedDate ? fmtDate(k.tappedDate) : '—';
 
       return (
         '<div class="keg" style="--tap-color:' + color + '">' +
-          badge +
+          '<span class="keg-badge fresh">Current</span>' +
           '<div class="keg-name">' + escapeHtml(k.name) + '</div>' +
           '<div class="keg-meta">' +
             '<span>Batch <b>' + (k.batchNumber ? '#' + escapeHtml(String(k.batchNumber)) : '—') + '</b></span>' +
-            '<span>Tapped <b>' + fmtDate(k.tappedDate) + '</b></span>' +
+            '<span>Tapped <b>' + tappedText + '</b></span>' +
           '</div>' +
-          '<div class="voh-math">' + mathHtml + '</div>' +
+          '<div class="voh-math">' +
+            '<div class="voh-row"><span>Inventory updated</span><b>' + escapeHtml(fmtDateTime(k.inventoryDate)) + '</b></div>' +
+            '<div class="voh-row total"><span>Vol On Hand</span><b>' + volumeText + '</b></div>' +
+          '</div>' +
         '</div>'
       );
     }).join('');
@@ -1402,7 +1384,7 @@
     } else if(currentTab === 'timeline'){
       renderTimeline(lastComputed.kegs, lastComputed.conditioning, lastComputed.fermenting);
     } else if(currentTab === 'volonhand'){
-      renderVolOnHand(lastComputed.volOnHand, lastComputed.requestLogError);
+      renderVolOnHand(lastComputed.volOnHand, lastComputed.inventoryError);
     } else {
       renderOnTap(lastComputed.kegs);
     }
@@ -1702,22 +1684,23 @@
       }
 
       const { historyByBeer, breweryAvg } = computeHistory(batches, s.tappedField, s.kickedField);
-      const kegs = computeOnTap(batches, s.tappedField, s.kickedField, historyByBeer, breweryAvg);
+      let inventoryRows = [];
+      let inventoryError = null;
+      try{
+        inventoryRows = await fetchInventoryRows();
+      } catch(inventoryErr){
+        console.error(inventoryErr);
+        inventoryError = inventoryErr.message;
+      }
+
+      const kegs = computeOnTap(batches, s.tappedField, s.kickedField, historyByBeer, breweryAvg, inventoryRows);
       const conditioning = computeConditioning(batches, s.conditioningField, historyByBeer, breweryAvg);
       const { byBeer: condTimeByBeer, breweryAvg: condTimeBreweryAvg } = computeConditioningTimeHistory(batches, s.conditioningField);
       const fermenting = computeFermenting(batches, s.conditioningField, condTimeByBeer, condTimeBreweryAvg, historyByBeer, breweryAvg);
 
-      let requestLogError = null;
-      let volOnHand = [];
-      try{
-        const requestRows = await fetchRequestRows();
-        volOnHand = computeVolOnHand(batches, s.tappedField, s.kickedField, s.volOnHandDateField, requestRows);
-      } catch(reqErr){
-        console.error(reqErr);
-        requestLogError = reqErr.message;
-      }
+      const volOnHand = computeVolOnHand(batches, s.tappedField, s.kickedField, inventoryRows);
 
-      lastComputed = { kegs, conditioning, fermenting, volOnHand, requestLogError };
+      lastComputed = { kegs, conditioning, fermenting, volOnHand, inventoryError };
       renderCurrentTab();
 
       if(batches.length > 0){
@@ -1725,7 +1708,7 @@
         el.debugOutput.textContent = JSON.stringify(batches[0], null, 2);
       }
 
-      setStatus(sourceLabel + ' · ' + batches.length + ' batches · ' + kegs.length + ' on tap · ' + conditioning.length + ' conditioning · ' + fermenting.length + ' fermenting');
+      setStatus(sourceLabel + ' · ' + batches.length + ' batches · ' + kegs.length + ' on tap · ' + conditioning.length + ' conditioning · ' + fermenting.length + ' fermenting' + (inventoryError ? ' · inventory unavailable' : ' · ' + inventoryRows.length + ' inventory rows'));
     } catch(err){
       console.error(err);
       setStatus('Error: ' + err.message, 'error');
